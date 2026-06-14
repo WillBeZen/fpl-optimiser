@@ -1,0 +1,30 @@
+# --- data ingestion (Section 1) ---
+requests          # FPL API + Understat (both plain HTTP, no browser)
+
+# --- data handling ---
+pandas
+numpy
+
+# --- modelling (Sections 2-3) ---
+scikit-learn
+lightgbm          # if macOS import complains about OpenMP:  brew install libomp
+
+# --- optimisation (Sections 4-5) ---
+pulp
+
+# --- Claude advisor (Section 6) ---
+anthropic
+python-dotenv
+
+# --- interface (Section 7) ---
+streamlit
+
+# --- plotting / dev ---
+matplotlib
+pytest
+
+# --- OPTIONAL: FBref route (only if you want FBref's defensive-action tables) ---
+# Needs Google Chrome installed (soccerdata uses a headless browser for FBref):
+#   brew install --cask google-chrome
+# soccerdata
+# lxml
