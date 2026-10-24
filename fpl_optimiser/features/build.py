@@ -7,6 +7,8 @@ Each row carries:
   - opponent:  the opponent faced that week — as-of rolling goals conceded (leakage-free),
                plus the season profile's archetype and FPL defensive strength
   - interaction: attacking form x opponent leakiness
+  - last season (optional `prior`): the player's previous-season averages blended
+               into his form as if played just before GW1, plus prev_* context columns
   - cold-start: a flag + position-median fallback for players with little history
 
 How it stays fast: `weighted_form_asof` is the readable definition of one row's
@@ -36,39 +38,64 @@ _FORM_FIELDS = {
     "form_bps_pg": "bps",
 }
 
+# Last-season context the model also sees (built by features/prior_season.py).
+# Rows with no previous-season record get has_prev_season False and NaN elsewhere.
+PRIOR_CONTEXT_COLUMNS = [
+    "has_prev_season", "prev_points_per_gw", "prev_minutes_per_gw",
+    "prev_points_per_90", "prev_xgi_per_90", "prev_defcon_per_90", "prev_changed_team",
+]
+
 _OUTPUT_COLUMNS = [
     "id", "round", "web_name", "position", "was_home", "opponent_team",
     "target_points", "minutes",
     *_FORM_FIELDS, "games_played", "form_starts_rate",
     "opp_gc_pg_asof", "opp_archetype", "opp_str_def", "x_xgi_oppgc", "is_cold",
+    *PRIOR_CONTEXT_COLUMNS,
 ]
 
 
+def _virtual_last_season(prior: dict, n_gw: int, gap_gw: float) -> pd.DataFrame:
+    """Last season as `n_gw` matches at its per-gameweek averages, ending `gap_gw`
+    gameweeks before this season's GW1 (its GW38 sits at round -gap_gw)."""
+    rows = {"round": np.arange(1, n_gw + 1) - n_gw - gap_gw}
+    rows.update({col: prior.get(f"pg_{col}", np.nan) for col in _FORM_FIELDS.values()})
+    rows["_played_60"] = prior.get("pg_played_60", np.nan)
+    return pd.DataFrame(rows)
+
+
 def weighted_form_asof(player_history: pd.DataFrame, as_of_round: int,
-                       half_life: float = config.RECENCY_HALF_LIFE_GW) -> dict:
+                       half_life: float = config.RECENCY_HALF_LIFE_GW,
+                       prior: dict | None = None,
+                       prior_gap_gw: float = config.PREV_SEASON_GAP_GW,
+                       prior_n_gw: int = config.GAMEWEEKS_IN_SEASON) -> dict:
     """Recency-weighted form from rounds strictly BEFORE `as_of_round` (no leakage).
+
+    `prior` (optional): this player's previous-season per-gameweek averages
+    ({'pg_total_points': ..., 'pg_played_60': ...}, see prior_season.py). Last season
+    then counts as `prior_n_gw` extra matches played before GW1, `prior_gap_gw`
+    gameweeks of summer break earlier, so it fades as this season's matches arrive.
 
     This is the one-row reference definition; `build_training_table` computes the
     same values for every row at once (and the tests check they agree).
     """
     h = player_history[player_history["round"] < as_of_round]
+    mins = _floats(_numeric(h, "minutes"))
+    games_played = int(np.nansum(mins > 0))               # this season's matches only
+    h = h.assign(_played_60=(mins >= 60).astype(float))
+    if prior is not None:
+        h = pd.concat([h, _virtual_last_season(prior, prior_n_gw, prior_gap_gw)],
+                      ignore_index=True)
     if h.empty:
         out = {k: float("nan") for k in _FORM_FIELDS}
         out.update(games_played=0, form_starts_rate=float("nan"))
         return out
 
-    g_ago = (as_of_round - h["round"]).to_numpy()
+    g_ago = (as_of_round - h["round"]).to_numpy(dtype=float)
     out: dict = {}
     for feat, col in _FORM_FIELDS.items():
-        if col in h.columns:
-            vals = pd.to_numeric(h[col], errors="coerce").to_numpy()
-        else:
-            vals = np.full(len(h), np.nan)
-        out[feat] = recency.weighted_mean(vals, g_ago, half_life)
-
-    mins = pd.to_numeric(h["minutes"], errors="coerce").to_numpy() if "minutes" in h else np.full(len(h), np.nan)
-    out["games_played"] = int(np.nansum(mins > 0))
-    out["form_starts_rate"] = recency.weighted_mean((mins >= 60).astype(float), g_ago, half_life)
+        out[feat] = recency.weighted_mean(_floats(_numeric(h, col)), g_ago, half_life)
+    out["games_played"] = games_played
+    out["form_starts_rate"] = recency.weighted_mean(_floats(h["_played_60"]), g_ago, half_life)
     return out
 
 
@@ -90,14 +117,29 @@ def _asof_weights(rounds: np.ndarray,
     return W, prior
 
 
-def _weighted_means(W: np.ndarray, values: np.ndarray) -> np.ndarray:
-    """`recency.weighted_mean` for every row (of W) and column (of values) at once:
-    sum(w * v) / sum(w) over the non-NaN values; NaN where nothing is usable."""
+def _weighted_sums(W: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Numerator sum(w * v) and denominator sum(w) over the non-NaN values, for
+    every row (of W) and column (of values) at once."""
     usable = ~np.isnan(values)
-    num = W @ np.where(usable, values, 0.0)
-    den = W @ usable.astype(float)
+    return W @ np.where(usable, values, 0.0), W @ usable.astype(float)
+
+
+def _ratio(num: np.ndarray, den: np.ndarray) -> np.ndarray:
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.where(den > 0, num / den, np.nan)
+
+
+def _weighted_means(W: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """`recency.weighted_mean` for every row and column at once (NaN = nothing usable)."""
+    return _ratio(*_weighted_sums(W, values))
+
+
+def _last_season_weight(rounds: np.ndarray, half_life: float, gap_gw: float,
+                        n_gw: int) -> np.ndarray:
+    """Total recency weight of `_virtual_last_season`'s matches, seen from each round:
+    sum over k = 0..n_gw-1 of decay(round + gap_gw + k), in closed form."""
+    return (recency.decay_weight(rounds + gap_gw, half_life)
+            * recency.decay_weight(np.arange(n_gw), half_life).sum())
 
 
 def _numeric(df: pd.DataFrame, col: str) -> pd.Series:
@@ -147,7 +189,10 @@ def team_defence_asof(fixtures: pd.DataFrame,
 
 def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
                          players: pd.DataFrame, profiles: pd.DataFrame,
-                         half_life: float = config.RECENCY_HALF_LIFE_GW) -> pd.DataFrame:
+                         half_life: float = config.RECENCY_HALF_LIFE_GW,
+                         prior: pd.DataFrame | None = None,
+                         prior_gap_gw: float = config.PREV_SEASON_GAP_GW,
+                         prior_n_gw: int = config.GAMEWEEKS_IN_SEASON) -> pd.DataFrame:
     """One row per (player, round) with features + targets.
 
     history_all : concat of fpl_api.player_history(pid) for all players, each with an
@@ -156,6 +201,8 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
                   defensive_contribution, bonus, bps.
     players     : fpl_api.players()  (id, position, team, web_name)
     profiles    : opponent.assign_archetypes(opponent.build_opponent_profiles(...))
+    prior       : optional prior_season.prior_table(...) — last season per player
+                  (THIS season's ids), blended into form and added as prev_* columns
     """
     if history_all.empty:
         return pd.DataFrame(columns=_OUTPUT_COLUMNS)
@@ -168,15 +215,25 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
     played = (mins > 0).astype(float)
     played_60 = (mins >= 60).astype(float)
 
-    # player form, strictly from earlier rounds (see _asof_weights)
+    # player form, strictly from earlier rounds (see _asof_weights), with last
+    # season blended in where we have it (see weighted_form_asof)
+    last = prior.set_index("id") if prior is not None else None
+    last_cols = [f"pg_{col}" for col in _FORM_FIELDS.values()] + ["pg_played_60"]
     form = np.full(stats.shape, np.nan)
     games_played = np.zeros(len(h))
     starts_rate = np.full(len(h), np.nan)
-    for idx in h.groupby("id").indices.values():
-        W, prior = _asof_weights(rounds[idx], half_life)
-        form[idx] = _weighted_means(W, stats[idx])
-        games_played[idx] = prior @ played[idx]
-        starts_rate[idx] = _weighted_means(W, played_60[idx, None])[:, 0]
+    for pid, idx in h.groupby("id").indices.items():
+        W, earlier = _asof_weights(rounds[idx], half_life)
+        num, den = _weighted_sums(W, np.column_stack([stats[idx], played_60[idx]]))
+        if last is not None and pid in last.index:
+            v = last.loc[pid, last_cols].to_numpy(dtype=float)
+            w = _last_season_weight(rounds[idx], half_life, prior_gap_gw, prior_n_gw)
+            num += np.outer(w, np.nan_to_num(v))
+            den += np.outer(w, ~np.isnan(v))
+        means = _ratio(num, den)
+        form[idx] = means[:, :-1]
+        starts_rate[idx] = means[:, -1]
+        games_played[idx] = earlier @ played[idx]
 
     meta = players.set_index("id")
     tbl = pd.DataFrame({
@@ -208,6 +265,16 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
 
     tbl["x_xgi_oppgc"] = tbl["form_xgi_pg"] * tbl["opp_gc_pg_asof"]
     tbl["is_cold"] = tbl["games_played"] < 3
+
+    # last-season context (False / NaN for players with no previous-season record)
+    ctx = last if last is not None else pd.DataFrame(columns=PRIOR_CONTEXT_COLUMNS)
+    for col in PRIOR_CONTEXT_COLUMNS:
+        tbl[col] = tbl["id"].map(ctx[col])
+    flags = ["has_prev_season", "prev_changed_team"]
+    for col in flags:
+        tbl[col] = tbl[col].fillna(False).astype(bool)
+    rates = [c for c in PRIOR_CONTEXT_COLUMNS if c not in flags]
+    tbl[rates] = tbl[rates].astype(float)
 
     return _apply_cold_start_priors(tbl[_OUTPUT_COLUMNS])
 

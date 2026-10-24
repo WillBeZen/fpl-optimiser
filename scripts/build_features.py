@@ -1,13 +1,14 @@
 """
-build_features.py — build (and cache) the Section 2 training table from live data.
+build_features.py — build the Section 2 training table from the season store.
 
-    python scripts/build_features.py --limit 50    # quick smoke (top-50 players)
-    python scripts/build_features.py               # full season (all players; slow first run)
+    python scripts/pull_fpl.py                         # first: file the live season
+    python scripts/build_features.py                   # every filed season
+    python scripts/build_features.py --seasons 2026-27
 
-Steps: pull players/fixtures/teams + opponent stats, build defensive archetypes,
-fetch each player's match history (cached after first run), assemble the
-leakage-safe per-(player, gameweek) table, and save it to
-data/processed/training_table.csv for Section 3.
+Each season is built separately (ids are per season), with the previous season as
+a prior when it is filed, then stacked with `season`, `code` (the player's permanent
+id) and `sample_weight` (an older season counts config.PREV_SEASON_WEIGHT as much
+per season back). Saved to data/processed/training_table.csv for Section 3.
 """
 from __future__ import annotations
 
@@ -17,53 +18,35 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-import pandas as pd
-
 import config
-from fpl_optimiser.ingest import fpl_api, opponent_stats
-from fpl_optimiser.features import opponent, build
+from fpl_optimiser.features import multi_season
+from fpl_optimiser.ingest import season_store
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=None,
-                    help="only the top-N players by points (quick test)")
-    ap.add_argument("--season", default=config.SEASON_TRAIN)
+    ap.add_argument("--seasons", nargs="*", default=None,
+                    help="seasons to build, e.g. 2025-26 2026-27 (default: every filed season)")
     args = ap.parse_args()
 
-    print("1/5 players, fixtures, teams ...")
-    players = fpl_api.players()
-    fixtures = fpl_api.fixtures()
-    teams = fpl_api.teams()
+    seasons = args.seasons or season_store.available()
+    if not seasons:
+        print("nothing filed yet: run scripts/pull_fpl.py first")
+        return 1
 
-    print("2/5 opponent stats + defensive archetypes ...")
-    opp = opponent_stats.opponent_stats(args.season)
-    profiles = opponent.assign_archetypes(opponent.build_opponent_profiles(opp, teams))
-    print(opponent.archetype_summary(profiles).to_string(index=False))
+    print(f"building {', '.join(seasons)} ...")
+    tbl = multi_season.build_all(seasons)
 
-    ids = players.sort_values("total_points", ascending=False)["id"].tolist()
-    if args.limit:
-        ids = ids[: args.limit]
-
-    print(f"3/5 fetching match history for {len(ids)} players (cached after first run) ...")
-    frames = []
-    for i, pid in enumerate(ids, 1):
-        h = fpl_api.player_history(int(pid))
-        if not h.empty:
-            frames.append(h.assign(id=int(pid)))
-        if i % 100 == 0:
-            print(f"   {i}/{len(ids)}")
-    history_all = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-    print("4/5 assembling training table ...")
-    tbl = build.build_training_table(history_all, fixtures, players, profiles)
-
-    print("5/5 saving ...")
     config.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out = config.PROCESSED_DIR / "training_table.csv"
     tbl.to_csv(out, index=False)
+
+    summary = tbl.groupby("season").agg(rows=("id", "size"), players=("code", "nunique"),
+                                        with_last_season=("has_prev_season", "mean"),
+                                        sample_weight=("sample_weight", "first"))
+    summary["with_last_season"] = (summary["with_last_season"] * 100).round().astype(int).astype(str) + "%"
+    print(summary.to_string())
     print(f"saved {len(tbl)} rows x {tbl.shape[1]} cols -> {out}")
-    print(tbl.head(8).to_string(index=False))
     return 0
 
 

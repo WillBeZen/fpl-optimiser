@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fpl_optimiser.features import build, opponent, recency
+from fpl_optimiser.features import build, opponent, prior_season, recency
 
 HL = 8.0  # recency half-life used throughout
 
@@ -16,6 +16,8 @@ EXPECTED_COLUMNS = [
     "form_points_pg", "form_minutes_pg", "form_xg_pg", "form_xa_pg", "form_xgi_pg",
     "form_defcon_pg", "form_bonus_pg", "form_bps_pg", "games_played", "form_starts_rate",
     "opp_gc_pg_asof", "opp_archetype", "opp_str_def", "x_xgi_oppgc", "is_cold",
+    "has_prev_season", "prev_points_per_gw", "prev_minutes_per_gw",
+    "prev_points_per_90", "prev_xgi_per_90", "prev_defcon_per_90", "prev_changed_team",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -72,9 +74,21 @@ def _history() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=_HISTORY_COLS)
 
 
-def _table(history=None, fixtures=FIXTURES) -> pd.DataFrame:
+# Last season for player 10, as prior_season.prior_table gives it: per-gameweek
+# averages (4 points, 80 minutes a week ...) plus the prev_* context.
+PRIOR = pd.DataFrame([{
+    "id": 10, "pg_total_points": 4.0, "pg_minutes": 80.0, "pg_expected_goals": 0.3,
+    "pg_expected_assists": 0.2, "pg_expected_goal_involvements": 0.5,
+    "pg_defensive_contribution": 4.0, "pg_bonus": 0.5, "pg_bps": 18.0, "pg_played_60": 0.9,
+    "has_prev_season": True, "prev_points_per_gw": 4.0, "prev_minutes_per_gw": 80.0,
+    "prev_points_per_90": 4.5, "prev_xgi_per_90": 0.56, "prev_defcon_per_90": 4.5,
+    "prev_changed_team": False,
+}])
+
+
+def _table(history=None, fixtures=FIXTURES, prior=None) -> pd.DataFrame:
     return build.build_training_table(_history() if history is None else history,
-                                      fixtures, PLAYERS, PROFILES, HL)
+                                      fixtures, PLAYERS, PROFILES, HL, prior=prior)
 
 
 # --------------------------------------------------------------------------- #
@@ -187,6 +201,7 @@ def test_training_table_smoke():
     assert len(tbl) == len(_history())              # one row per match (a DGW gives two)
     assert tbl["target_points"].sum() == _history()["total_points"].sum()
     assert tbl.loc[tbl["round"] == 1, "is_cold"].all()
+    assert not tbl["has_prev_season"].any()         # no prior given
 
 
 def test_training_table_matches_reference_form():
@@ -213,10 +228,11 @@ def test_training_table_opponent_features_are_venue_correct():
     assert row["x_xgi_oppgc"] == pytest.approx(row["form_xgi_pg"] * d[(3, 4)])
 
 
-def test_training_table_has_no_leakage():
+@pytest.mark.parametrize("prior", [None, PRIOR], ids=["this season only", "with last season"])
+def test_training_table_has_no_leakage(prior):
     """Rewriting what happened in GW3 (incl. its double gameweek) must not change a
     single feature of any GW1-GW3 row; only GW3's targets and later rows may move."""
-    base = _table()
+    base = _table(prior=prior)
     hist = _history()
     gw3 = hist["round"] == 3
     hist.loc[gw3, "total_points"] = 99
@@ -224,7 +240,7 @@ def test_training_table_has_no_leakage():
     hist.loc[gw3, "minutes"] = 1
     fx = FIXTURES.copy()
     fx.loc[fx["gameweek"] == 3, ["home_score", "away_score"]] = 9
-    changed = _table(hist, fx)
+    changed = _table(hist, fx, prior=prior)
 
     features = [c for c in EXPECTED_COLUMNS if c not in ("target_points", "minutes")]
     upto_gw3 = base["round"] <= 3
@@ -242,6 +258,54 @@ def test_cold_start_prior_uses_earlier_rounds_only():
     for opp in (1, 2):                               # both of player 20's GW3 matches
         assert tbl.loc[(20, 3, opp), "is_cold"]
         assert tbl.loc[(20, 3, opp), "form_points_pg"] == 8
+
+
+# --------------------------------------------------------------------------- #
+# last season as a prior
+# --------------------------------------------------------------------------- #
+def test_prior_table_from_linked_season_totals():
+    prev = pd.DataFrame({"id": [1, 2], "total_points": [190, 20], "minutes": [3000, 200],
+                         "starts": [34, 2], "expected_goals": [11.4, 0.1],
+                         "expected_assists": [3.8, 0.0], "expected_goal_involvements": [15.2, 0.1],
+                         "defensive_contribution": [76, 9], "bonus": [19, 0], "bps": [700, 40]})
+    links = pd.DataFrame({"id_prev": [1, 2], "id_curr": [10, 30], "changed_team": [False, True]})
+    p = prior_season.prior_table(prev, links, prev_gameweeks=38, min_minutes=270).set_index("id")
+    assert p.loc[10, "pg_total_points"] == pytest.approx(190 / 38)      # keyed by THIS season's id
+    assert p.loc[10, "pg_played_60"] == pytest.approx(34 / 38)
+    assert p.loc[10, "prev_points_per_90"] == pytest.approx(190 / 3000 * 90)
+    assert math.isnan(p.loc[30, "prev_points_per_90"])      # 200 minutes: too few for a rate
+    assert p.loc[30, "prev_changed_team"] and p["has_prev_season"].all()
+
+
+def test_last_season_seeds_gw1_and_matches_reference():
+    tbl, hist = _table(prior=PRIOR), _history()
+    p10 = tbl[tbl["id"] == 10].set_index("round")
+    # GW1: nothing from this season yet, so form IS last season's average
+    assert p10.loc[1, "form_points_pg"] == pytest.approx(4.0)
+    assert p10.loc[1, "form_starts_rate"] == pytest.approx(0.9)
+    assert p10["has_prev_season"].all() and not tbl.loc[tbl["id"] != 10, "has_prev_season"].any()
+    assert (p10["prev_points_per_90"] == 4.5).all()
+    # every row equals the readable definition (last season as virtual matches)
+    prior = PRIOR.iloc[0].to_dict()
+    for rnd, row in p10.iterrows():
+        ref = build.weighted_form_asof(hist[hist["id"] == 10], rnd, HL, prior=prior)
+        for col, want in ref.items():
+            assert row[col] == pytest.approx(want), (rnd, col)
+
+
+def test_last_season_fades_as_this_season_accumulates():
+    rounds = np.array([1.0, 2.0, 10.0, 20.0])
+    w = build._last_season_weight(rounds, HL, gap_gw=8, n_gw=38)
+    brute = [sum(recency.decay_weight(r + 8 + k, HL) for k in range(38)) for r in rounds]
+    assert w == pytest.approx(brute)                    # closed form = the virtual-match sum
+    assert (np.diff(w) < 0).all()
+
+    # in the table: last season's pull on form shrinks every week
+    key = ["id", "round", "opponent_team"]
+    loud = _table(prior=PRIOR.assign(pg_total_points=40.0)).set_index(key)["form_points_pg"]
+    quiet = _table().set_index(key)["form_points_pg"]
+    pull = (loud - quiet).loc[10].dropna()               # GW2-4 (GW1 has no this-season form)
+    assert len(pull) == 3 and (np.diff(pull.to_numpy()) < 0).all()
 
 
 def test_training_table_empty_history():

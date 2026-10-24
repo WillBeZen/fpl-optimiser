@@ -112,11 +112,34 @@ ARCHETYPE_K = 3
 # are treated as bench fodder (not picked to start).
 MIN_START_PROB = 0.6
 
-# Advanced opponent stats source for the opponent_stats adapter. "fbref" works via
-# soccerdata + Google Chrome (the proven path). "understat" is lighter and adds a
-# pressing metric (PPDA) but now sits behind Cloudflare and may block plain HTTP;
-# the adapter falls back automatically if the chosen source errors.
-ADVANCED_STATS_SOURCE = "fbref"
+# Opponent stats source for the opponent_stats adapter. "fpl" derives goals
+# conceded per game from the season's own filed FPL results: no browser, and always
+# the right season. That is everything FBref's schedule currently gives us, so it is
+# the default. "fbref" (soccerdata + Google Chrome) and "understat" (adds PPDA, but
+# often Cloudflare-blocked) remain as backends; the adapter falls back on error.
+ADVANCED_STATS_SOURCE = "fpl"
+
+# Last season as a prior (Section 2). A player's previous-season averages enter his
+# recency-weighted form as if that season ended PREV_SEASON_GAP_GW gameweeks before
+# GW1 (the summer break, in decay terms). With half-life 8 and gap 8, last season
+# is worth ~5 recent matches at GW1, ~2 by GW10, under 1 by GW20. Bigger = trust
+# last season less.
+PREV_SEASON_GAP_GW = 8.0
+
+# How much a previous-season training row counts relative to this season's when
+# the model is fitted (sample_weight), and how much last season's minutes count
+# when blending player profiles for the graphics. Two seasons back = this squared.
+PREV_SEASON_WEIGHT = 0.5
+
+# Per-90 rates from fewer minutes than this are too noisy to use (left NaN).
+PREV_SEASON_MIN_MINUTES = 270
+
+# Player archetypes (graphics + report). Players are clustered per position on
+# per-90 profiles: clusters per position, and the minutes needed to be profiled.
+# Three per position on purpose: a scatter can only keep 3 colours distinct for
+# colour-blind readers, and the report colours each player by type.
+PLAYER_ARCHETYPE_K = {"GK": 3, "DEF": 3, "MID": 3, "FWD": 3}
+PROFILE_MIN_MINUTES = 450
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -147,6 +170,9 @@ def validate() -> None:
     assert 0 <= MIN_START_PROB <= 1
     assert RECENCY_HALF_LIFE_GW > 0
     assert 1 <= PLANNING_HORIZON_GW <= GAMEWEEKS_IN_SEASON
+    assert PREV_SEASON_GAP_GW >= 0
+    assert 0 < PREV_SEASON_WEIGHT <= 1, "a previous season should never outweigh this one"
+    assert set(PLAYER_ARCHETYPE_K) == set(POSITION_QUOTA)
 
 
 if __name__ == "__main__":
