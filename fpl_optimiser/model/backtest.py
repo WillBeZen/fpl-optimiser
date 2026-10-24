@@ -8,6 +8,9 @@ it could have been on the day, with only the past.
 Compared against two baselines anyone could compute:
   form         the recency-weighted points per gameweek (the form_points_pg feature)
   season avg   the player's plain average points per gameweek so far this season
+and, when the season's raw data is passed in (`events_data`), the event model
+(model/events.py), which adds up goals, assists, clean sheets... from team and
+player rates as of each round, with minutes from the same fitted minutes model.
 
 Scores per method:
   MAE / RMSE   average miss, in points per fixture
@@ -19,17 +22,32 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from fpl_optimiser.model import points
+import config
+from fpl_optimiser.model import events, points
 
-METHODS = {"xp": "Model", "form": "Form (recency-weighted)", "season_avg": "Season average"}
+METHODS = {"xp_blend": "Blend (what the planner uses)", "xp": "Points model",
+           "xp_events": "Event model", "form": "Form (recency-weighted)",
+           "season_avg": "Season average"}
 
 
-def walk_forward(table: pd.DataFrame, season: str,
-                 rounds: list[int] | None = None) -> pd.DataFrame:
+def _player_team(rows: pd.DataFrame, fixtures: pd.DataFrame) -> pd.Series:
+    """The player's own club for each training row (its opponent, round and venue
+    identify the fixture)."""
+    fx = fixtures.dropna(subset=["gameweek"])
+    home = {(int(g), int(a)): int(h) for g, h, a in zip(fx["gameweek"], fx["home_id"], fx["away_id"])}
+    away = {(int(g), int(h)): int(a) for g, h, a in zip(fx["gameweek"], fx["home_id"], fx["away_id"])}
+    return pd.Series([(home if wh else away).get((int(r), int(o))) for r, o, wh in
+                      zip(rows["round"], rows["opponent_team"], rows["was_home"])], index=rows.index)
+
+
+def walk_forward(table: pd.DataFrame, season: str, rounds: list[int] | None = None,
+                 events_data: dict | None = None) -> pd.DataFrame:
     """Out-of-sample predictions for `season`'s rounds (default: all but its first).
 
-    table : multi_season.build_all() — rows with season, round, targets, features.
-    Returns that season's rows for the tested rounds with xp, form and season_avg.
+    table       : multi_season.build_all() — rows with season, round, targets, features.
+    events_data : optional events.season_data(season), to backtest the event model too.
+    Returns that season's rows for the tested rounds with xp (and xp_events), form
+    and season_avg.
     """
     known = table.dropna(subset=["target_points", "minutes"])
     this = known[known["season"] == season]
@@ -40,7 +58,18 @@ def walk_forward(table: pd.DataFrame, season: str,
         test = this[this["round"] == r].copy()
         if test.empty or train.empty:
             continue
-        test["xp"] = points.fit(train).predict(test)["xp"].to_numpy()
+        pred = points.fit(train).predict(test)
+        test["xp"] = pred["xp"].to_numpy()
+        test["p_play"], test["p_60"] = pred["p_play"].to_numpy(), pred["p_60"].to_numpy()
+        if events_data is not None:
+            d = events_data
+            rows = test.assign(team=_player_team(test, d["fixtures"])).dropna(subset=["team"])
+            ratings = events.team_ratings(d["fixtures"], d["teams"], r, d["history"],
+                                          d.get("prev_fixtures"), d.get("prev_teams"))
+            rates = events.player_rates(d["history"], d["players"], r, d.get("prior"))
+            test["xp_events"] = events.expected_events(rows, ratings, rates)["xp_events"].reindex(test.index)
+            w = config.EVENT_MODEL_WEIGHT
+            test["xp_blend"] = (1 - w) * test["xp"] + w * test["xp_events"]
         test["form"] = test["form_points_pg"].fillna(train["target_points"].mean())
         so_far = this[this["round"] < r].groupby("id")["target_points"].mean()
         test["season_avg"] = test["id"].map(so_far).fillna(train["target_points"].mean())
@@ -52,6 +81,8 @@ def summarise(preds: pd.DataFrame) -> pd.DataFrame:
     """One row per method: MAE, RMSE, mean per-gameweek rank correlation, top-11 points."""
     rows = []
     for col, name in METHODS.items():
+        if col not in preds or preds[col].isna().all():
+            continue
         err = preds[col] - preds["target_points"]
         corr = preds.groupby("round")[[col, "target_points"]].apply(
             lambda d: d[col].corr(d["target_points"], method="spearman"))

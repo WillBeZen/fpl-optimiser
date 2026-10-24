@@ -87,3 +87,15 @@ def test_load_round_trip_and_season_check(tmp_path, fake_api):
         tmp_path / "2025-26" / "bootstrap-static.json")
     with pytest.raises(ValueError):
         ss.load("2025-26", root=tmp_path)
+
+
+def test_only_finished_matches_count_as_played():
+    """Mid-gameweek FPL lists every match, played or not: only finished ones are kept."""
+    import pandas as pd
+    history = pd.DataFrame({"id": [1, 1, 1], "fixture": [10, 11, 12], "round": [7, 8, 8],
+                            "minutes": [90, 90, 0]})
+    fixtures = pd.DataFrame({"fixture_id": [10, 11, 12], "finished": [True, True, False]})
+    kept = ss.played_only(history, fixtures)
+    assert list(kept["fixture"]) == [10, 11]
+    assert ss.played_only(history.drop(columns="fixture"), fixtures).equals(
+        history.drop(columns="fixture"))                       # nothing to check against

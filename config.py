@@ -114,6 +114,13 @@ HORIZON_DECAY = 0.9
 # any tiny gain, because the plan can't see the flexibility it throws away.
 FREE_TRANSFER_VALUE = 1.5
 
+# Event-model weight (Section 3). The expected points the optimiser uses are a blend:
+# (1 - w) x the points model (gradient-boosted trees) + w x the event model (team
+# ratings -> fixture goals -> each player's goals, assists, clean sheets...). In the
+# walk-forward backtest over 2026/27 GW2-7, w = 0.5 beat both on its own: RMSE 2.20 ->
+# 2.14, rank correlation 0.645 -> 0.659, top-11 points 55.8 -> 56.7. 0 = points model only.
+EVENT_MODEL_WEIGHT = 0.5
+
 # Opponent archetypes (Section 2). Number of defensive "styles" the 20 teams are
 # clustered into, for interpretation and for Claude's narrative.
 ARCHETYPE_K = 3
@@ -195,6 +202,7 @@ def validate() -> None:
     assert 0 < HORIZON_DECAY <= 1
     assert 0 <= BENCH_WEIGHT < 1
     assert FREE_TRANSFER_VALUE >= 0
+    assert 0 <= EVENT_MODEL_WEIGHT <= 1
     assert PREV_SEASON_GAP_GW >= 0
     assert 0 < PREV_SEASON_WEIGHT <= 1, "a previous season should never outweigh this one"
     assert set(PLAYER_ARCHETYPE_K) == set(POSITION_QUOTA)

@@ -6,10 +6,17 @@ next `horizon` gameweeks (computed as of the next deadline, exactly as training
 computes them), predicts expected points per fixture, applies FPL's injury and
 suspension flags, and adds up double gameweeks.
 
+Each fixture also gets the event model's breakdown (model/events.py: expected
+goals, assists, clean sheet, ... and points by source), and the expected points the
+optimiser uses blend the two models:
+
+    xp = (1 - w) x xp_model + w x xp_events        w = config.EVENT_MODEL_WEIGHT
+
 The result has one row per (player, gameweek): `xp` (expected points, after
-availability), `xp_raw` (before), `p_play`, `p_60`, `fixtures` ("ARS (H), CHE (A)"),
-plus who he is (id, code, name, club, position, price, status, news). A blank
-gameweek gives xp 0. This table is what the optimiser (Sections 4-5) consumes.
+availability), `xp_raw` (before), `xp_model` and `xp_events` (the two parts),
+`p_play`, `p_60`, `fixtures` ("ARS (H), CHE (A)"), plus who he is (id, code, name,
+club, position, price, status, news). A blank gameweek gives xp 0. This table is
+what the optimiser (Sections 4-5) consumes.
 """
 from __future__ import annotations
 
@@ -21,7 +28,7 @@ import pandas as pd
 import config
 from fpl_optimiser.features import build, multi_season
 from fpl_optimiser.ingest import season_store
-from fpl_optimiser.model import points
+from fpl_optimiser.model import events, points
 
 # FPL status codes: a available, d doubtful, i injured, s suspended,
 # u unavailable (left the club / on loan), n not in the squad.
@@ -38,6 +45,9 @@ class Forecast:
     per_fixture: pd.DataFrame   # one row per (player, fixture), with the model's parts
     model: points.PointsModel
     deadline: str = ""          # the next gameweek's deadline, "YYYY-MM-DD HH:MM" UTC
+    ratings: events.Ratings | None = None   # team attack/defence as of the next gameweek
+    rates: pd.DataFrame | None = None       # each player's per-90 rates (events.player_rates)
+    event_weight: float = config.EVENT_MODEL_WEIGHT
 
     @property
     def players(self) -> pd.DataFrame:
@@ -84,7 +94,8 @@ def availability(players: pd.DataFrame, gw: int, next_gw: int) -> pd.Series:
 
 
 def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_GW,
-             table: pd.DataFrame | None = None) -> Forecast:
+             table: pd.DataFrame | None = None,
+             event_weight: float = config.EVENT_MODEL_WEIGHT) -> Forecast:
     """Fit on every filed season and predict the next `horizon` gameweeks of `season`."""
     season = season or season_store.available()[-1]
     table = multi_season.build_all() if table is None else table
@@ -100,6 +111,7 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
                                         as_of_round=nxt, gameweeks=gws, prior=prior)
     fx = rows.join(model.predict(rows))
     fx["xp_raw"] = fx["xp"]
+    unflagged = fx[["p_play", "p_60"]].copy()          # minutes before FPL's injury flags
     for gw in gws:
         on = fx["round"] == gw
         mult = fx.loc[on, "id"].map(availability(cur.players, gw, nxt)).fillna(1.0)
@@ -109,16 +121,30 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
     short = cur.teams.set_index("id")["short_name"]
     fx["fixture"] = (fx["opponent_team"].map(short) + np.where(fx["was_home"], " (H)", " (A)"))
 
+    # the event model's breakdown, and the blend the optimiser uses
+    prev_season = season_store.previous_season(season)
+    prev = season_store.load(prev_season) if prev_season in season_store.available() else None
+    ratings = events.team_ratings(cur.fixtures, cur.teams, nxt, cur.history,
+                                  prev.fixtures if prev else None, prev.teams if prev else None)
+    rates = events.player_rates(cur.history, cur.players, nxt, prior)
+    fx = fx.join(events.expected_events(fx, ratings, rates))
+    events_raw = events.expected_events(fx.assign(**unflagged), ratings, rates)["xp_events"]
+    fx["xp_model"], fx["xp_model_raw"] = fx["xp"], fx["xp_raw"]
+    fx["xp"] = (1 - event_weight) * fx["xp_model"] + event_weight * fx["xp_events"]
+    fx["xp_raw"] = (1 - event_weight) * fx["xp_model_raw"] + event_weight * events_raw
+
     # one row per (player, gameweek): double gameweeks add up, blanks are 0
     per_gw = fx.groupby(["id", "round"]).agg(
-        xp=("xp", "sum"), xp_raw=("xp_raw", "sum"), p_play=("p_play", "max"),
+        xp=("xp", "sum"), xp_raw=("xp_raw", "sum"), xp_model=("xp_model", "sum"),
+        xp_events=("xp_events", "sum"), p_play=("p_play", "max"),
         p_60=("p_60", "max"), fixtures=("fixture", ", ".join))
     grid = pd.MultiIndex.from_product([cur.players["id"], gws], names=["id", "round"])
-    per_gw = per_gw.reindex(grid).fillna({"xp": 0.0, "xp_raw": 0.0, "p_play": 0.0,
-                                          "p_60": 0.0, "fixtures": "-"}).reset_index()
+    per_gw = per_gw.reindex(grid).fillna({"xp": 0.0, "xp_raw": 0.0, "xp_model": 0.0, "xp_events": 0.0,
+                                          "p_play": 0.0, "p_60": 0.0, "fixtures": "-"}).reset_index()
     info = cur.players[["id", "code", "web_name", "team_name", "position", "price", "status", "news"]]
     xp = info.merge(per_gw.rename(columns={"round": "gw"}), on="id")
     when = cur.gameweeks.loc[cur.gameweeks["id"] == nxt, "deadline_time"]
     deadline = f"{when.iloc[0]:%Y-%m-%d %H:%M}" if len(when) and pd.notna(when.iloc[0]) else ""
     return Forecast(season=season, next_gw=nxt, gameweeks=gws, xp=xp, per_fixture=fx,
-                    model=model, deadline=deadline)
+                    model=model, deadline=deadline, ratings=ratings, rates=rates,
+                    event_weight=event_weight)

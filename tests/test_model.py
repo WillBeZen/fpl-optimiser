@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import config
 from fpl_optimiser.model import backtest, inputs, minutes, points, predict
 from tests.test_multi_season import two_seasons  # noqa: F401  (pytest fixture)
 
@@ -65,9 +66,10 @@ def test_backtest_only_ever_trains_on_the_past(monkeypatch):
     assert sorted(preds["round"].unique()) == [4, 5, 6]
 
     summary = backtest.summarise(preds).set_index("method")
-    assert set(summary.index) == set(backtest.METHODS.values())
+    needs_events = {"Event model", "Blend (what the planner uses)"}            # need events_data
+    assert set(summary.index) == set(backtest.METHODS.values()) - needs_events
     # with this obvious signal the model's top 11 are all regulars
-    assert summary.loc["Model", "top11_points"] > 50
+    assert summary.loc["Points model", "top11_points"] > 50
 
 
 def test_availability_flags():
@@ -89,3 +91,16 @@ def test_forecast_from_a_filed_store(two_seasons):
     blank = fc.xp[fc.xp["gw"] == 4]
     assert (blank["xp"] == 0).all() and (blank["fixtures"] == "-").all()
     assert list(fc.wide().columns[-4:]) == ["GW3", "GW4", "GW5", "total"]
+
+
+def test_forecast_blends_the_points_and_event_models(two_seasons):
+    fc = predict.forecast(horizon=3)
+    fx = fc.per_fixture
+    w = config.EVENT_MODEL_WEIGHT
+    assert fx["xp"].tolist() == pytest.approx(((1 - w) * fx["xp_model"] + w * fx["xp_events"]).tolist())
+    assert {"xg", "p_cs", "Goals", "Clean sheet"} <= set(fx.columns)
+    assert fc.ratings is not None and set(fc.ratings.teams["short_name"]) == {"A", "B", "D"}
+    gw3 = fc.xp[fc.xp["gw"] == 3]
+    assert gw3["xp"].tolist() == pytest.approx(((1 - w) * gw3["xp_model"] + w * gw3["xp_events"]).tolist())
+    only_model = predict.forecast(horizon=3, event_weight=0.0)
+    assert only_model.xp["xp"].tolist() == pytest.approx(only_model.xp["xp_model"].tolist())

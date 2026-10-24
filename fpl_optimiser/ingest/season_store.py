@@ -136,11 +136,24 @@ def assemble(season: str, bootstrap: dict, fixtures: list,
                   for pid, s in sorted(summaries.items()) if s.get(key)]
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
+    parsed = fpl_api.parse_fixtures(fixtures, teams)
     return Season(season=season, bootstrap=bootstrap,
-                  players=fpl_api.parse_players(bootstrap), teams=teams,
-                  fixtures=fpl_api.parse_fixtures(fixtures, teams),
+                  players=fpl_api.parse_players(bootstrap), teams=teams, fixtures=parsed,
                   gameweeks=fpl_api.parse_gameweeks(bootstrap),
-                  history=stack("history"), past=stack("history_past"))
+                  history=played_only(stack("history"), parsed), past=stack("history_past"))
+
+
+def played_only(history: pd.DataFrame, fixtures: pd.DataFrame) -> pd.DataFrame:
+    """Only match records whose fixture FPL has marked finished.
+
+    Once a gameweek starts, FPL lists every player's match in it, including those
+    not yet kicked off (0 minutes, 0 points) and those still being played. Counted
+    as real games they would drag form down and teach the models that players
+    didn't play, so they are dropped until the fixture is finished."""
+    if history.empty or "fixture" not in history or "finished" not in fixtures:
+        return history
+    done = set(fixtures.loc[fixtures["finished"] == True, "fixture_id"])  # noqa: E712
+    return history[history["fixture"].isin(done)].reset_index(drop=True)
 
 
 def previous_season(season: str) -> str:
