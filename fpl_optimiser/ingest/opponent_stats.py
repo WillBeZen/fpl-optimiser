@@ -14,14 +14,16 @@ Canonical columns:
     (plus any source extras, e.g. ppda_mean from Understat)
 
 Backends:
+    "fpl"        goals conceded from the season's own filed FPL results
+                 (season_store). No browser, always the right season, and the same
+                 signal FBref's schedule gives today. The default.
     "fbref"      via soccerdata.read_schedule() — needs Google Chrome (soccerdata
-                 reads FBref through a headless browser). This is the proven-working
-                 source and the default.
+                 reads FBref through a headless browser).
     "understat"  via understat.py (plain HTTP) — lighter and adds PPDA, but Understat
                  now sits behind Cloudflare and may block plain requests.
 
 `opponent_stats()` tries the configured source first and automatically falls back
-to the other if it errors, so a Cloudflare block on one source is not fatal.
+to the others if it errors, so a Cloudflare block on one source is not fatal.
 """
 from __future__ import annotations
 
@@ -114,7 +116,27 @@ def _from_understat(season: str) -> pd.DataFrame:
     return out
 
 
-_BACKENDS = {"fbref": _from_fbref, "understat": _from_understat}
+def goals_conceded_from_fixtures(fixtures: pd.DataFrame) -> pd.DataFrame:
+    """Pure: parsed FPL fixtures -> per-team matches and goals conceded per game."""
+    fin = fixtures.dropna(subset=["home_score", "away_score"])
+    if "finished" in fin.columns:
+        fin = fin[fin["finished"] == True]  # noqa: E712
+    long = pd.concat([pd.DataFrame({"team": fin["home"], "gc": fin["away_score"]}),
+                      pd.DataFrame({"team": fin["away"], "gc": fin["home_score"]})])
+    long["gc"] = pd.to_numeric(long["gc"], errors="coerce")
+    out = (long.groupby("team")["gc"].agg(matches="size", goals_conceded_per_game="mean")
+               .reset_index())
+    out["xga_per_game"] = float("nan")       # FPL results carry no team xG
+    return out
+
+
+def _from_fpl(season: str) -> pd.DataFrame:
+    from fpl_optimiser.ingest import season_store
+
+    return goals_conceded_from_fixtures(season_store.load_fixtures(season))
+
+
+_BACKENDS = {"fpl": _from_fpl, "fbref": _from_fbref, "understat": _from_understat}
 
 
 def opponent_stats(season: str = config.SEASON_TRAIN,

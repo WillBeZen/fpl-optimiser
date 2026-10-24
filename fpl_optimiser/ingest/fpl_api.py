@@ -24,6 +24,10 @@ _DEFAULT_TTL_H = 6.0
 # FPL element_type id -> our position code (FPL uses "GKP"; we use "GK").
 _POSITION_BY_TYPE = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
 
+# Who a player is, beyond this season's `id`: the permanent `code`, plus date of
+# birth and nationality (`region`) used to cross-check links between seasons.
+_IDENTITY_COLS = ["code", "birth_date", "region", "team_code", "team_join_date"]
+
 # Player stat columns we lift from the API. Any that are absent get filled with
 # NA, so a schema tweak on FPL's side never crashes ingestion.
 _PLAYER_STAT_COLS = [
@@ -72,20 +76,36 @@ def _http():
     return _session
 
 
+def fetch(path: str, retries: int = 3) -> Any:
+    """Uncached GET {FPL_API_BASE}/{path}/ -> parsed JSON.
+
+    Retries politely (2s, 4s, ...) on rate limiting (429) and server errors, which
+    FPL returns while it updates between gameweeks.
+    """
+    url = f"{config.FPL_API_BASE}/{path.strip('/')}/"
+    for attempt in range(retries + 1):
+        resp = _http().get(url, timeout=20)
+        if resp.status_code not in (429, 500, 502, 503, 504) or attempt == retries:
+            resp.raise_for_status()
+            return resp.json()
+        time.sleep(2 ** (attempt + 1))
+
+
+def cache_key(path: str) -> str:
+    """'element-summary/12' -> 'element-summary_12' (the on-disk file stem)."""
+    return path.strip("/").replace("/", "_") or "root"
+
+
 def _cached_get(path: str, ttl_hours: float = _DEFAULT_TTL_H) -> Any:
     """GET {FPL_API_BASE}/{path}/ with a small on-disk JSON cache."""
     _CACHE.mkdir(parents=True, exist_ok=True)
-    key = path.strip("/").replace("/", "_") or "root"
-    cache_file = _CACHE / f"{key}.json"
+    cache_file = _CACHE / f"{cache_key(path)}.json"
 
     fresh = cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < ttl_hours * 3600
     if fresh:
         return json.loads(cache_file.read_text())
 
-    url = f"{config.FPL_API_BASE}/{path.strip('/')}/"
-    resp = _http().get(url, timeout=20)
-    resp.raise_for_status()
-    data = resp.json()
+    data = fetch(path)
     cache_file.write_text(json.dumps(data))
     return data
 
@@ -94,8 +114,10 @@ def _cached_get(path: str, ttl_hours: float = _DEFAULT_TTL_H) -> Any:
 # Parsing layer (pure) — unit-testable on mock dicts
 # --------------------------------------------------------------------------- #
 def parse_teams(bootstrap: dict) -> pd.DataFrame:
+    """One row per club. `id` is re-assigned every season (alphabetical, so it
+    shifts with promotion/relegation); `code` is FPL's permanent club code."""
     teams = pd.DataFrame(bootstrap["teams"])
-    cols = ["id", "name", "short_name", "strength",
+    cols = ["id", "code", "name", "short_name", "strength",
             "strength_attack_home", "strength_attack_away",
             "strength_defence_home", "strength_defence_away"]
     cols = [c for c in cols if c in teams.columns]
@@ -103,14 +125,16 @@ def parse_teams(bootstrap: dict) -> pd.DataFrame:
 
 
 def parse_players(bootstrap: dict) -> pd.DataFrame:
+    """One row per player. `id` is re-assigned every season; `code` is FPL's
+    permanent player code (Opta's), which is what links seasons together."""
     players = pd.DataFrame(bootstrap["elements"])
     teams = parse_teams(bootstrap).set_index("id")
 
     keep = ["id", "web_name", "first_name", "second_name", "team", "element_type"]
-    for c in _PLAYER_STAT_COLS:
+    for c in _IDENTITY_COLS + _PLAYER_STAT_COLS:
         if c not in players.columns:
             players[c] = pd.NA
-    df = players[keep + _PLAYER_STAT_COLS].copy()
+    df = players[keep + _IDENTITY_COLS + _PLAYER_STAT_COLS].copy()
 
     df["position"] = df["element_type"].map(_POSITION_BY_TYPE)
     df["team_name"] = df["team"].map(teams["name"])

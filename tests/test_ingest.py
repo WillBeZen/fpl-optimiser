@@ -145,6 +145,28 @@ import config  # noqa: E402
 from fpl_optimiser.ingest import opponent_stats  # noqa: E402
 
 
+def test_parse_keeps_permanent_codes():
+    bs = {**MOCK_BOOTSTRAP,
+          "teams": [{**t, "code": c} for t, c in zip(MOCK_BOOTSTRAP["teams"], (3, 43))],
+          "elements": [{**e, "code": c, "birth_date": "2000-07-21"}
+                       for e, c in zip(MOCK_BOOTSTRAP["elements"], (223094, 461358))]}
+    assert fpl_api.parse_teams(bs).set_index("id").loc[2, "code"] == 43
+    players = fpl_api.parse_players(bs).set_index("id")
+    assert players.loc[100, "code"] == 223094 and players.loc[100, "birth_date"] == "2000-07-21"
+    # ...and still copes when a payload lacks them
+    assert fpl_api.parse_players(MOCK_BOOTSTRAP)["code"].isna().all()
+
+
+def test_goals_conceded_from_fpl_results():
+    unplayed = {"id": 2, "event": 2, "team_h": 2, "team_a": 1, "finished": False,
+                "team_h_score": None, "team_a_score": None}
+    fx = fpl_api.parse_fixtures(MOCK_FIXTURES + [unplayed], fpl_api.parse_teams(MOCK_BOOTSTRAP))
+    gc = opponent_stats.goals_conceded_from_fixtures(fx).set_index("team")
+    assert gc.loc["Arsenal", "goals_conceded_per_game"] == 1      # Arsenal 2-1 Man City
+    assert gc.loc["Man City", "goals_conceded_per_game"] == 2
+    assert gc.loc["Arsenal", "matches"] == 1                      # the unplayed fixture is ignored
+
+
 def test_parse_score_handles_dashes():
     assert opponent_stats._parse_score("2-1") == (2, 1)
     assert opponent_stats._parse_score("3\u20130") == (3, 0)   # en dash

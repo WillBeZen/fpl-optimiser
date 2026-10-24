@@ -74,11 +74,12 @@ def main() -> int:
         traceback.print_exc()
         print(f"{NO} FPL fixtures failed")
 
-    # 4 — opponent stats via the adapter (auto-selects a working source)
+    # 4 — opponent stats via the adapter (auto-selects a working source). Uses the
+    # LIVE season, because step 5 compares it with the live FPL team names.
     step("4. opponent stats (advanced; auto-selects source)")
     opp_team_names: list[str] = []
     try:
-        opp = opponent_stats.opponent_stats(config.SEASON_TRAIN)
+        opp = opponent_stats.opponent_stats(config.SEASON_LIVE)
         src = opp.attrs.get("source", "?")
         print(f"{OK} via '{src}' | {len(opp)} teams | columns: {list(opp.columns)}")
         have_xga = "xga_per_game" in opp.columns and opp["xga_per_game"].notna().any()
