@@ -39,15 +39,19 @@ human-readable explanation and for Claude's narrative.
 | Decision | Choice |
 |---|---|
 | Language | **Python** |
-| Data | **FPL API** (players, prices, fixtures, your squad — incl. per-player xG and CBIT defensive stats) + **Understat** (team xGA / PPDA / deep completions, fetched browserless). FBref via `soccerdata` is optional and needs Google Chrome. |
+| Data | **FPL API** (players, prices, fixtures, results, your squad — incl. per-player xG and CBIT defensive stats), **filed per season** in a season store so nothing is overwritten. Opponent stats from FPL's own results by default; FBref (needs Chrome) and Understat (PPDA, often blocked) are optional backends. |
+| Seasons | Players are linked across seasons by FPL's **permanent player code** (ids change every season), with name + date of birth + nationality as fallbacks. Last season enters as a recency-weighted **prior** and as down-weighted training rows. |
 | Planning | **Multi-week from v1** (not a later add-on) |
 | Claude advisor | **Anthropic API with web search** for live news |
+| Interface | One **self-contained HTML report** (Plotly, works offline), built by `scripts/make_report.py` |
 
 ## Verified facts the build rests on
 
-- **2026/27 season:** 22 Aug 2026 → 30 May 2027, 38 gameweeks; fixtures released
-  19 Jun 2026. It is currently the **off-season** — we train and backtest on the
-  completed 2025/26 season and go live for GW1.
+- **2026/27 season:** 22 Aug 2026 → 30 May 2027, 38 gameweeks. Under way: GW7 had
+  finished at the last pull (24 Oct 2026). The live API serves only the current
+  season, so 2025/26 is kept frozen in the season store (full-season totals for all
+  841 players; per-match history for the top 50 only). Promoted: Coventry City,
+  Hull City, Ipswich Town; relegated: Burnley, West Ham, Wolves.
 - **Squad:** 15 players (2 GK / 5 DEF / 5 MID / 3 FWD), £100m budget, max 3 per club.
 - **Transfers:** 1 free per gameweek, bank up to 5, retained through chips; extra
   transfers cost −4 each.
@@ -65,11 +69,14 @@ human-readable explanation and for Claude's narrative.
 
 - [x] **0 — Scaffold & docs.** Repo structure, `config.py` (all rules + tunable
   dials), this charter, the docs framework, a passing config test.
-- [x] **1 — Data ingestion.** FPL API client (cached fetch + pure parsing) +
-  FBref/Understat via `soccerdata`; team-name reconciliation; xG and CBIT
-  defensive fields confirmed present on the FPL endpoint.
-- [ ] **2 — Feature engineering.** Exponential recency weighting; opponent
-  characteristic vectors + archetypes; player×opponent interactions; cold-start priors.
+- [x] **1 — Data ingestion.** FPL API client (cached fetch + pure parsing); season
+  store (file each season, freeze finished ones); cross-season player and club
+  links; opponent-stats adapter (FPL results / FBref / Understat); team-name
+  reconciliation; xG and CBIT defensive fields confirmed on the FPL endpoint.
+- [x] **2 — Feature engineering.** Exponential recency weighting; opponent
+  characteristic vectors + archetypes; player×opponent interactions; leakage-free
+  cold-start priors; last season as a prior; one multi-season table with sample
+  weights; player types (for the report).
 - [ ] **3 — Prediction model.** Minutes model, then points-component model
   (LightGBM, recency-weighted); walk-forward backtest vs a naive baseline.
 - [ ] **4 — Optimisation.** Single-gameweek MILP (PuLP): squad, XI, captain under
@@ -78,4 +85,6 @@ human-readable explanation and for Claude's narrative.
   −4 hit (only when the gain over the horizon clears the threshold); chip timing.
 - [ ] **6 — Claude advisor.** Anthropic API + web search → structured JSON
   recommendation with a 0–100 action score; news adjusts, never overrides, the maths.
-- [ ] **7 — Interface.** Streamlit dashboard over the modules.
+- [ ] **7 — Interface.** A self-contained HTML report over the modules. *Started:*
+  the report exists with player types, attacking threat, risers and fallers, value
+  and the season link; Sections 3–6 add their sections as they are built.

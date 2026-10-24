@@ -22,12 +22,13 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ## How to run
 
 ```bash
-python -m venv .venv && source .venv/bin/activate   # NOT inside iCloud — see Gotchas
+source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (33 tests today)
+python -m pytest -q                            # MUST stay green (56 tests today)
+python scripts/pull_fpl.py                     # file the live season into data/raw/fpl/<season>/
+python scripts/build_features.py               # every filed season -> data/processed/training_table.csv
+python scripts/make_report.py --open           # reports/fpl_report.html (offline, self-contained)
 python scripts/verify_setup.py                 # live health check (FPL + opponent source)
-python scripts/build_features.py --limit 50    # quick training-table build
-python scripts/build_features.py               # full season -> data/processed/training_table.csv
 ```
 
 Run everything from the repo root (a root `conftest.py` puts it on `sys.path`, so
@@ -40,7 +41,9 @@ config.py                     SINGLE SOURCE OF TRUTH: FPL rules + strategy knobs
 conftest.py                   makes the repo root importable
 fpl_optimiser/
   ingest/
-    fpl_api.py                FPL API client (cached fetch + PURE parse_* fns)   [done]
+    fpl_api.py                FPL API client (fetch + PURE parse_* fns)          [done]
+    season_store.py           files each season in data/raw/fpl/<season>/; freeze [done]
+    player_link.py            same player across seasons: code -> name+dob -> dob+region+surname [done]
     opponent_stats.py         source-agnostic opponent table + auto-fallback     [done]
     fbref.py                  FBref via soccerdata (needs Chrome) — a backend     [done]
     understat.py              Understat plain-HTTP (PPDA) — a backend, often blocked [done]
@@ -49,16 +52,24 @@ fpl_optimiser/
     recency.py                exponential decay weighting                        [done]
     opponent.py               opponent profiles + k-means archetypes             [done]
     build.py                  leakage-safe (player, gameweek) training table     [done]
+    prior_season.py           last season per player, as a prior                 [done]
+    multi_season.py           every filed season stacked, with sample weights    [done]
+    player_profiles.py        per-90 player profiles + player types (report)     [done]
   model/                      minutes model, points model, backtest              [Section 3 - stubs]
   optimise/                   squad MILP (S4) + multi-week planner (S5)           [stubs]
   claude/advisor.py           Claude advisor + news -> score/100 (S6)            [stub]
-  app/dashboard.py            Streamlit UI (S7)                                   [stub]
+  app/
+    charts.py                 Plotly figure builders (light + dark, validated palette) [done]
+    report.py                 the self-contained HTML report (S7)                [started]
 scripts/
+  pull_fpl.py                 files the live season (polite, resumable)
+  build_features.py           builds the multi-season training table
+  make_report.py              writes reports/fpl_report.html
   verify_setup.py             environment + live-source health check
-  build_features.py           builds & caches the training table
 docs/                         00_charter + one doc per section
-tests/                        pytest; run on MOCK data, never hit the network
-data/                         raw / processed / cache (git-ignored)
+tests/                        pytest; MOCK payloads / tiny synthetic seasons, never the network
+data/                         raw (filed seasons) / processed / cache (git-ignored)
+reports/                      generated HTML (git-ignored)
 ```
 
 ## Architecture invariants (do not violate)
@@ -79,19 +90,26 @@ data/                         raw / processed / cache (git-ignored)
    suite green; add tests with new logic.
 6. **The two engines stay separable.** Prediction outputs expected points;
    optimisation consumes them. Don't entangle them.
+7. **Ids are per season; `code` is forever.** FPL re-assigns player and team `id`s
+   every season. Never join two seasons on `id`: link players with
+   `player_link.link_players` (permanent `code` first) and clubs on their `code`.
+8. **Filed seasons are immutable.** Raw data lives in `data/raw/fpl/<season>/`; a
+   frozen season is never rewritten. Read seasons through `season_store.load`.
 
 ## Data sources (reality, learned the hard way)
 
 - **FPL API** (`fantasy.premierleague.com/api`, no auth) is primary. It has all
   player data incl. per-player **xG/xA and CBIT defensive stats**, fixtures with
   FDR, and squads. No scraping needed for players.
-- **Advanced team stats** come through the `opponent_stats` adapter:
-  - `fbref` (default) — via `soccerdata`, which drives **headless Chrome**
-    (`brew install --cask google-chrome`). Its `schedule()` has scores but **no xG**
-    in this version, so we derive goals-conceded; `xga_per_game` is NaN for now.
-  - `understat` — plain HTTP, adds **PPDA**, but is currently **Cloudflare-blocked**
-    for plain requests. Adapter auto-falls-back.
-- Be polite: caching is on everywhere; don't disable soccerdata's rate limiting.
+- The live API serves **only the current season**. 2025/26 is frozen in the store
+  (season totals for all 841 players; per-match history for the top 50 only).
+- **Opponent (team) stats** come through the `opponent_stats` adapter:
+  - `fpl` (default) — goals conceded from the season's filed FPL results; no browser.
+  - `fbref` — via `soccerdata`, which drives **headless Chrome**. Its `schedule()`
+    has scores but **no xG** in this version, i.e. nothing `fpl` doesn't give.
+  - `understat` — plain HTTP, adds **PPDA**, but often **Cloudflare-blocked**.
+- Be polite: the pull uses one keep-alive session, pauses between players and backs
+  off on 429/5xx; don't disable soccerdata's rate limiting if you use FBref.
 
 ## Conventions
 
@@ -109,28 +127,38 @@ data/                         raw / processed / cache (git-ignored)
 - FPL "free transfers available this week" is **not** in the API — infer from
   transfer history (Section 5).
 - `dash` (macOS `/bin/sh`) has no brace expansion; use explicit paths in scripts.
-- **iCloud vs the venv**: this repo sits in iCloud-synced `~/Documents`, and iCloud
-  offloaded 98% of `.venv` (files go `dataless`), so imports stalled for minutes and
-  pytest looked hung. Keep the venv outside iCloud (e.g. `~/.venvs/fpl-optimiser`).
+- **iCloud vs Python**: the repo used to live in iCloud-synced `~/Documents`;
+  iCloud offloaded 98% of `.venv` (files go `dataless`), so imports stalled for
+  minutes and pytest looked hung. Even Python's start-up scan of an iCloud working
+  directory can stall. The repo now lives in `~/Developer`; `.venv` is a symlink to
+  `~/.venvs/fpl-optimiser`. Keep both out of iCloud.
 - **seleniumbase hijacks pytest**: soccerdata pulls in seleniumbase, which
-  auto-registers pytest plugins. `pytest.ini` sets `--disable-plugin-autoload`.
+  auto-registers ~7 pytest plugins. `pytest.ini` sets `--disable-plugin-autoload`.
 - **Tests are network-guarded**: `tests/conftest.py` makes any DNS/socket call raise.
-- **The FPL cache is season-blind**: the key has no season and a 6–12 h TTL. Since
-  Aug 2026 the live API serves 2026/27, so a refresh overwrites the 2025/26 files.
-  A frozen copy lives in `data/raw/fpl_snapshot_2025-26/`.
+- **The old FPL cache (`data/cache/fpl/`) is season-blind** (no season in the key,
+  6–12 h TTL). Only `verify_setup.py` and the `fpl_api` convenience functions use
+  it; everything that builds features reads the season store instead.
+- **Accents in names**: Unicode can't decompose ø/æ/ß/ł, so stripping accents
+  deletes them (Ødegaard -> "degaard"); `player_link.normalise_name` spells them
+  out first.
+- **Plotly chart ids**: a chart's DOM id must differ from its section's id
+  (`getElementById` returns the first match and the chart lands in the wrong place);
+  the report prefixes chart ids with `fig-`.
 - The FPL API needs a `User-Agent` header and a trailing slash on endpoints.
 
 ## Roadmap
 
 - [x] 0 Scaffold · [x] 1 Data ingestion · [x] 2 Feature engineering
-- [ ] **3 Prediction model** — minutes model, then points model (LightGBM,
-  recency-weighted samples), then a **walk-forward** backtest vs a naive baseline.
+- [ ] **3 Prediction model** — minutes model, then points model (LightGBM, fitted on
+  the multi-season table with its `sample_weight`), then a **walk-forward** backtest
+  vs a naive baseline. Add its results to the HTML report as a new `Section`.
 - [ ] 4 Optimisation — single-GW MILP (PuLP): squad + XI + captain under all rules.
 - [ ] 5 Multi-week planning — rolling horizon; bank vs spend vs −4 hit only when the
   gain over the horizon clears `config.HIT_THRESHOLD_POINTS`; chip timing.
 - [ ] 6 Claude advisor — Anthropic API + web search -> JSON recommendation + 0–100
   score; news adjusts, never overrides, the maths.
-- [ ] 7 Interface — Streamlit dashboard.
+- [ ] 7 Interface — self-contained HTML report (`app/report.py`). *Started:* player
+  types, attacking threat, risers/fallers, value, season link. Sections 3–6 add theirs.
 
 ## Working style
 
