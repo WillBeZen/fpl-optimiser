@@ -127,6 +127,13 @@ MIN_START_PROB = 0.6
 # 0 = pick the cheapest possible bench; higher = a stronger bench.
 BENCH_WEIGHT = 0.1
 
+# Claude advisor (Section 6). Reads the week's plan against live football news
+# (Anthropic's web search tool) and scores 0-100 how strongly to act on it.
+# Needs ANTHROPIC_API_KEY in .env; one request per run with a few searches.
+ADVISOR_MODEL = "claude-opus-5-5"
+ADVISOR_EFFORT = "high"          # low | medium | high | xhigh | max
+ADVISOR_MAX_SEARCHES = 6
+
 # Opponent stats source for the opponent_stats adapter. "fpl" derives goals
 # conceded per game from the season's own filed FPL results: no browser, and always
 # the right season. That is everything FBref's schedule currently gives us, so it is
