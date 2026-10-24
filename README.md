@@ -22,10 +22,16 @@ pip install -r requirements.txt
 cp .env.example .env               # then add your ANTHROPIC_API_KEY
 ```
 
+> **macOS + iCloud:** if the repo lives in an iCloud-synced folder (Desktop or
+> Documents with "Desktop & Documents Folders" on), don't put the venv inside it.
+> iCloud offloads its files to the cloud and every `import` stalls while they
+> download, so `pytest` looks frozen. Put the venv outside, e.g.
+> `python3 -m venv ~/.venvs/fpl-optimiser`, or keep the repo in `~/Developer`.
+
 ## Check it works
 
 ```bash
-python -m pytest -q                # validates config
+python -m pytest -q                # offline test suite, a few seconds
 python config.py                   # prints "config OK"
 ```
 
