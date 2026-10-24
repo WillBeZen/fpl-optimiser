@@ -1,7 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+.venv
 .venv.nosync/
 .pytest_cache/
 
@@ -14,6 +14,9 @@ data/raw/*
 data/processed/*
 data/cache/*
 !data/*/.gitkeep
+
+# Generated HTML report (rebuild with: python scripts/make_report.py)
+reports/
 
 # macOS
 .DS_Store

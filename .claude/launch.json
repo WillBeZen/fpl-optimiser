@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "report",
+      "runtimeExecutable": "/Users/williambryan/.venvs/fpl-optimiser/bin/python",
+      "runtimeArgs": ["-I", "-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "reports"],
+      "port": 8765
+    }
+  ]
+}
