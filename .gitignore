@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv.nosync/
+.pytest_cache/
+
+# Secrets: copy .env.example to .env and put your real key there.
+.env
+*.env
+
+# Local data (README: raw / processed / cache are not committed)
+data/raw/*
+data/processed/*
+data/cache/*
+!data/*/.gitkeep
+
+# macOS
+.DS_Store
+
+# Created by seleniumbase (soccerdata's browser driver for FBref)
+downloaded_files/
