@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from fpl_optimiser.ingest import season_store
+from fpl_optimiser.ingest import rules_check, season_store
 
 
 def main() -> int:
@@ -38,6 +38,12 @@ def main() -> int:
     s = season_store.load(season)
     print(f"filed {season}: {len(s.players)} players, {s.history['id'].nunique()} with match "
           f"history, {s.finished_gameweeks} finished gameweeks -> {season_store.season_dir(season)}")
+
+    problems = rules_check.check_rules(s.bootstrap)
+    for p in problems:
+        print(f"WARNING rules: {p}")
+    print("rules: config.py matches FPL's published rules" if not problems
+          else "-> update the RULES block in config.py")
     return 0
 
 

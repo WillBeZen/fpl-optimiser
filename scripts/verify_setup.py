@@ -109,9 +109,26 @@ def main() -> int:
     else:
         print("   (skipped — needed both team lists from steps 2 and 4)")
 
+    # 6 — config.py's rules vs FPL's published rules
+    step("6. config.py rules vs FPL's published rules")
+    try:
+        from fpl_optimiser.ingest import rules_check
+        problems = rules_check.check_rules(fpl_api._cached_get("bootstrap-static"))
+        for p in problems:
+            print(f"{NO} {p}")
+        if problems:
+            failures += 1
+            print("   -> update the RULES block in config.py")
+        else:
+            print(f"{OK} config.py matches FPL's published rules")
+    except Exception:
+        failures += 1
+        traceback.print_exc()
+        print(f"{NO} rules check failed")
+
     step("summary")
     if failures == 0:
-        print(f"{OK} all good — paste steps 4-5 back and we'll start Section 2.")
+        print(f"{OK} all good.")
     else:
         print(f"{NO} {failures} check(s) need attention above.")
     return 0 if failures == 0 else 2

@@ -4,10 +4,10 @@ config.py — single source of truth for FPL rules and strategy knobs.
 Two clearly separated blocks:
 
   RULES     The game's hard constraints — FACTS about how FPL scores and which
-            squads are legal. The optimiser treats these as inviolable. The
-            baseline below is the 2025/26 rule set (the most recent *confirmed*
-            season). The 2026/27 rules are not published yet (FPL usually
-            announces in late July); when they drop, edit THIS block only.
+            squads are legal. The optimiser treats these as inviolable. These are
+            the 2026/27 rules, confirmed against FPL's own published game_config;
+            ingest/rules_check.py re-checks them after every pull and warns if FPL
+            changes anything. If it does, edit THIS block only.
 
   STRATEGY  Your tunable dials. Nothing here is a rule — these are choices that
             trade risk against reward. Change them freely and re-run; the
@@ -30,7 +30,7 @@ SEASON_LIVE = "2026-27"    # starts 22 Aug 2026 — what we actually pick teams 
 GAMEWEEKS_IN_SEASON = 38
 
 # --------------------------------------------------------------------------- #
-# RULES — FPL hard constraints (2025/26 baseline; confirm for 2026/27)
+# RULES — FPL hard constraints (2026/27, confirmed from FPL's game_config)
 # --------------------------------------------------------------------------- #
 
 # Squad composition: exactly 15 players in these position quotas (sums to 15).
@@ -56,7 +56,7 @@ TRANSFER_HIT_COST = 4       # each transfer beyond your free allowance costs 4 p
 CAPTAIN_MULTIPLIER = 2          # captain scores double
 VICE_CAPTAIN_MULTIPLIER = 1     # vice only matters if the captain doesn't play
 
-# Chips (2025/26 structure). TWO full sets across the season; the FIRST set must
+# Chips (2026/27, as 2025/26). TWO full sets across the season; the FIRST set must
 # be used on/before the split-gameweek deadline, the SECOND set after it.
 CHIPS = ("wildcard", "free_hit", "bench_boost", "triple_captain")
 CHIP_SETS_PER_SEASON = 2
@@ -68,7 +68,7 @@ TRIPLE_CAPTAIN_MULTIPLIER = 3
 SCORING = {
     "minutes_under_60": 1,
     "minutes_60_plus": 2,
-    "goal": {"GK": 6, "DEF": 6, "MID": 5, "FWD": 4},
+    "goal": {"GK": 10, "DEF": 6, "MID": 5, "FWD": 4},    # GK goal = 10 (FPL game_config 2026/27)
     "assist": 3,                                       # all positions
     "clean_sheet": {"GK": 4, "DEF": 4, "MID": 1, "FWD": 0},   # needs 60+ mins
     "goals_conceded_per_2": {"GK": -1, "DEF": -1, "MID": 0, "FWD": 0},
