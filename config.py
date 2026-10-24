@@ -96,7 +96,7 @@ RECENCY_HALF_LIFE_GW = 8.0
 
 # Multi-week planning (Section 5). How many gameweeks ahead the planner reasons
 # about when choosing to bank a transfer, spend it, or take a hit.
-PLANNING_HORIZON_GW = 5
+PLANNING_HORIZON_GW = 6
 
 # Hit threshold (Section 5). Take a -4 hit only if the EXTRA points it buys over
 # the planning horizon exceed this. Deliberately > TRANSFER_HIT_COST so a
