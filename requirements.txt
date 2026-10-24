@@ -13,7 +13,7 @@ scikit-learn>=1.6,<2       # [1.9]
 lightgbm>=4.5,<5           # if macOS import complains about OpenMP: brew install libomp  [4.6]
 
 # --- optimisation (Sections 4-5) ---
-pulp>=3.0,<4               # [3.3]
+pulp>=3.0,<4               # 4.0 stops bundling the CBC solver  [3.3]
 
 # --- Claude advisor (Section 6) ---
 anthropic>=0.100,<1        # [0.109]

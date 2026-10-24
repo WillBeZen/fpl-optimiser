@@ -104,6 +104,16 @@ PLANNING_HORIZON_GW = 5
 # is our margin for prediction error).
 HIT_THRESHOLD_POINTS = 6.0
 
+# Horizon decay (Section 5). Each gameweek further ahead counts this much less in
+# the plan (0.9: next GW 1.0, then 0.9, 0.81, ...). Predictions get less certain
+# with distance, so near-term points are preferred over equal distant ones.
+HORIZON_DECAY = 0.9
+
+# Value of a banked free transfer at the end of the plan (Section 5), in expected
+# points. Without it the planner would spend every transfer in the last week for
+# any tiny gain, because the plan can't see the flexibility it throws away.
+FREE_TRANSFER_VALUE = 1.5
+
 # Opponent archetypes (Section 2). Number of defensive "styles" the 20 teams are
 # clustered into, for interpretation and for Claude's narrative.
 ARCHETYPE_K = 3
@@ -111,6 +121,11 @@ ARCHETYPE_K = 3
 # Minutes floor (Sections 3–4). Players below this predicted start probability
 # are treated as bench fodder (not picked to start).
 MIN_START_PROB = 0.6
+
+# Bench value (Sections 4–5). Bench players only score when someone in the XI
+# doesn't play, so the optimiser counts their expected points at this fraction.
+# 0 = pick the cheapest possible bench; higher = a stronger bench.
+BENCH_WEIGHT = 0.1
 
 # Opponent stats source for the opponent_stats adapter. "fpl" derives goals
 # conceded per game from the season's own filed FPL results: no browser, and always
@@ -170,6 +185,9 @@ def validate() -> None:
     assert 0 <= MIN_START_PROB <= 1
     assert RECENCY_HALF_LIFE_GW > 0
     assert 1 <= PLANNING_HORIZON_GW <= GAMEWEEKS_IN_SEASON
+    assert 0 < HORIZON_DECAY <= 1
+    assert 0 <= BENCH_WEIGHT < 1
+    assert FREE_TRANSFER_VALUE >= 0
     assert PREV_SEASON_GAP_GW >= 0
     assert 0 < PREV_SEASON_WEIGHT <= 1, "a previous season should never outweigh this one"
     assert set(PLAYER_ARCHETYPE_K) == set(POSITION_QUOTA)
