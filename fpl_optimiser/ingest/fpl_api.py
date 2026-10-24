@@ -39,9 +39,9 @@ _PLAYER_STAT_COLS = [
     # 2025/26 defensive-contribution inputs (CBIT / CBIRT):
     "clearances_blocks_interceptions", "recoveries", "tackles",
     "defensive_contribution",
-    # market / availability:
+    # market / availability (news: FPL's injury/suspension note, e.g. "Knee - 75%"):
     "selected_by_percent", "form", "now_cost",
-    "chance_of_playing_next_round", "status",
+    "chance_of_playing_next_round", "status", "news",
 ]
 
 _NUMERIC_COLS = [

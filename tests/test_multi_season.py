@@ -64,7 +64,9 @@ def two_seasons(tmp_path, monkeypatch):
     _file(tmp_path, "2026-27", 2, [(1, 3, "A"), (2, 43, "B"), (3, 56, "D")],
           [_player(5, 1001, 1, 3, "Star", "2000-01-01", total_points=11, minutes=180, starts=2),
            _player(6, 2001, 3, 4, "New", "2005-05-05", total_points=6, minutes=90, starts=1)],
-          [_fixture(1, 1, 3, 1, 1, 3), _fixture(2, 2, 1, 2, 0, 0)],
+          [_fixture(1, 1, 3, 1, 1, 3), _fixture(2, 2, 1, 2, 0, 0),
+           {"id": 3, "event": 3, "team_h": 1, "team_a": 3, "finished": False,   # still to play
+            "team_h_score": None, "team_a_score": None}],
           {5: [_match(1, 3, False, 90, 9), _match(2, 2, True, 90, 2)],
            6: [_match(1, 1, True, 90, 6)]})
 

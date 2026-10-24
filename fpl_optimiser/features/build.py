@@ -46,7 +46,7 @@ PRIOR_CONTEXT_COLUMNS = [
 ]
 
 _OUTPUT_COLUMNS = [
-    "id", "round", "web_name", "position", "was_home", "opponent_team",
+    "id", "round", "web_name", "position", "was_home", "opponent_team", "price",
     "target_points", "minutes",
     *_FORM_FIELDS, "games_played", "form_starts_rate",
     "opp_gc_pg_asof", "opp_archetype", "opp_str_def", "x_xgi_oppgc", "is_cold",
@@ -209,15 +209,41 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
 
     # stable sort keeps a double gameweek's two matches in their original order
     h = history_all.sort_values(["id", "round"], kind="stable").reset_index(drop=True)
+    last = prior.set_index("id") if prior is not None else None
+
+    meta = players.set_index("id")
+    tbl = pd.DataFrame({
+        "id": h["id"],
+        "round": h["round"].astype(int),
+        "web_name": h["id"].map(meta["web_name"]),
+        "position": h["id"].map(meta["position"]),
+        "was_home": (h["was_home"].fillna(False).astype(bool) if "was_home" in h
+                     else pd.Series(False, index=h.index)),
+        "opponent_team": _numeric(h, "opponent_team"),
+        "price": _numeric(h, "value") / 10.0,          # that gameweek's price, known pre-match
+        "target_points": _numeric(h, "total_points"),
+        "minutes": _numeric(h, "minutes"),
+    })
+    tbl = pd.concat([tbl, _player_form(h, half_life, last, prior_gap_gw, prior_n_gw)], axis=1)
+
+    # opponent: leakage-free as-of goals conceded, joined on (opponent, round)
+    defence = team_defence_asof(fixtures, half_life).rename(columns={"team_id": "opponent_team"})
+    tbl = tbl.merge(defence, on=["opponent_team", "round"], how="left", validate="many_to_one")
+
+    return _apply_cold_start_priors(_finish(tbl, profiles, last)[_OUTPUT_COLUMNS])
+
+
+def _player_form(h: pd.DataFrame, half_life: float, last: pd.DataFrame | None,
+                 prior_gap_gw: float, prior_n_gw: int) -> pd.DataFrame:
+    """Form for every row of `h` (any players' histories), strictly from earlier
+    rounds (see _asof_weights), with last season blended in where `last` has the
+    player (see weighted_form_asof). Indexed like `h`."""
     rounds = _floats(h["round"])
     stats = np.column_stack([_floats(_numeric(h, col)) for col in _FORM_FIELDS.values()])
     mins = _floats(_numeric(h, "minutes"))
     played = (mins > 0).astype(float)
     played_60 = (mins >= 60).astype(float)
 
-    # player form, strictly from earlier rounds (see _asof_weights), with last
-    # season blended in where we have it (see weighted_form_asof)
-    last = prior.set_index("id") if prior is not None else None
     last_cols = [f"pg_{col}" for col in _FORM_FIELDS.values()] + ["pg_played_60"]
     form = np.full(stats.shape, np.nan)
     games_played = np.zeros(len(h))
@@ -235,28 +261,18 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
         starts_rate[idx] = means[:, -1]
         games_played[idx] = earlier @ played[idx]
 
-    meta = players.set_index("id")
-    tbl = pd.DataFrame({
-        "id": h["id"],
-        "round": h["round"].astype(int),
-        "web_name": h["id"].map(meta["web_name"]),
-        "position": h["id"].map(meta["position"]),
-        "was_home": (h["was_home"].fillna(False).astype(bool) if "was_home" in h
-                     else pd.Series(False, index=h.index)),
-        "opponent_team": _numeric(h, "opponent_team"),
-        "target_points": _numeric(h, "total_points"),
-        "minutes": _numeric(h, "minutes"),
-    })
-    tbl[list(_FORM_FIELDS)] = form
-    tbl["games_played"] = games_played.astype(int)
-    tbl["form_starts_rate"] = starts_rate
+    out = pd.DataFrame(form, columns=list(_FORM_FIELDS), index=h.index)
+    out["games_played"] = games_played.astype(int)
+    out["form_starts_rate"] = starts_rate
+    return out
 
-    # opponent: leakage-free as-of goals conceded, joined on (opponent, round)
-    defence = team_defence_asof(fixtures, half_life).rename(columns={"team_id": "opponent_team"})
-    tbl = tbl.merge(defence, on=["opponent_team", "round"], how="left", validate="many_to_one")
 
-    # opponent: season profile. Player at home -> opponent played AWAY -> use the
-    # opponent's AWAY defensive strength (and vice versa).
+def _finish(tbl: pd.DataFrame, profiles: pd.DataFrame, last: pd.DataFrame | None) -> pd.DataFrame:
+    """The columns training and prediction rows share once form and opponent
+    goals-conceded are in place: opponent profile, interaction, cold flag and
+    last-season context."""
+    # player at home -> opponent played AWAY -> use the opponent's AWAY defensive
+    # strength (and vice versa)
     prof = profiles.set_index("team_id")
     tbl["opp_archetype"] = tbl["opponent_team"].map(prof["archetype"])
     tbl["opp_str_def"] = np.where(tbl["was_home"],
@@ -275,8 +291,79 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
         tbl[col] = tbl[col].fillna(False).astype(bool)
     rates = [c for c in PRIOR_CONTEXT_COLUMNS if c not in flags]
     tbl[rates] = tbl[rates].astype(float)
+    return tbl
 
-    return _apply_cold_start_priors(tbl[_OUTPUT_COLUMNS])
+
+def team_defence_at(fixtures: pd.DataFrame, as_of_round: int,
+                    half_life: float = config.RECENCY_HALF_LIFE_GW) -> pd.Series:
+    """team_id -> recency-weighted goals conceded over finished matches BEFORE
+    `as_of_round` (what `team_defence_asof` would give for a match in that round)."""
+    fx = fixtures.dropna(subset=["gameweek", "home_score", "away_score"])
+    if "finished" in fx.columns:
+        fx = fx[fx["finished"] == True]  # noqa: E712
+    fx = fx[fx["gameweek"] < as_of_round]
+    long = pd.concat([pd.DataFrame({"team_id": fx["home_id"], "gw": fx["gameweek"], "gc": fx["away_score"]}),
+                      pd.DataFrame({"team_id": fx["away_id"], "gw": fx["gameweek"], "gc": fx["home_score"]})])
+    long["w"] = recency.decay_weight(as_of_round - _floats(long["gw"]), half_life)
+    long["wgc"] = long["w"] * _floats(_numeric(long, "gc"))
+    sums = long.groupby("team_id")[["wgc", "w"]].sum()
+    return sums["wgc"] / sums["w"]
+
+
+def build_prediction_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
+                           players: pd.DataFrame, profiles: pd.DataFrame,
+                           as_of_round: int, gameweeks: list[int],
+                           half_life: float = config.RECENCY_HALF_LIFE_GW,
+                           prior: pd.DataFrame | None = None,
+                           prior_gap_gw: float = config.PREV_SEASON_GAP_GW,
+                           prior_n_gw: int = config.GAMEWEEKS_IN_SEASON) -> pd.DataFrame:
+    """Feature rows for UPCOMING fixtures: one per (current player, fixture of his
+    team in `gameweeks`), with every feature computed exactly as the training table
+    would for a match in round `as_of_round`, from rounds strictly before it.
+
+    A double gameweek gives a player two rows; a blank gameweek none. Targets are
+    unknown, so `target_points` and `minutes` are NaN. `round` is the fixture's
+    gameweek; `fixture_id` and `team` identify it.
+    """
+    last = prior.set_index("id") if prior is not None else None
+
+    # form as of `as_of_round`: one probe row per current player, in that round
+    past = history_all[history_all["round"] < as_of_round] if len(history_all) else history_all
+    probes = pd.DataFrame({"id": players["id"].to_numpy(), "round": as_of_round, "_probe": True})
+    h = (pd.concat([past, probes], ignore_index=True)
+           .sort_values(["id", "round"], kind="stable").reset_index(drop=True))
+    is_probe = h["_probe"].eq(True).to_numpy()
+    all_form = _player_form(h, half_life, last, prior_gap_gw, prior_n_gw)
+    form = all_form[is_probe].set_axis(h.loc[is_probe, "id"].to_numpy())
+
+    # each current player against each upcoming fixture of his team
+    fx = fixtures[fixtures["gameweek"].isin(gameweeks)]
+    if "finished" in fx.columns:
+        fx = fx[fx["finished"] != True]  # noqa: E712
+    sides = pd.concat([
+        pd.DataFrame({"team": fx["home_id"], "opponent_team": fx["away_id"], "was_home": True,
+                      "round": fx["gameweek"], "fixture_id": fx["fixture_id"]}),
+        pd.DataFrame({"team": fx["away_id"], "opponent_team": fx["home_id"], "was_home": False,
+                      "round": fx["gameweek"], "fixture_id": fx["fixture_id"]}),
+    ], ignore_index=True)
+    cols = ["id", "web_name", "position", "team", "price"]
+    tbl = players[cols].merge(sides, on="team").sort_values(["id", "round", "fixture_id"])
+    tbl = tbl.reset_index(drop=True)
+    tbl["round"] = tbl["round"].astype(int)
+    tbl["target_points"] = np.nan
+    tbl["minutes"] = np.nan
+    tbl = tbl.join(form, on="id")
+    tbl["opp_gc_pg_asof"] = tbl["opponent_team"].map(team_defence_at(fixtures, as_of_round, half_life))
+    tbl = _finish(tbl, profiles, last)
+
+    # cold start, exactly as _apply_cold_start_priors would for a match in this
+    # round: the position's median form over every earlier player-match row
+    earlier = all_form[~is_probe].assign(
+        position=h.loc[~is_probe, "id"].map(players.set_index("id")["position"]).to_numpy())
+    medians = earlier.groupby("position")[list(_FORM_FIELDS)].median()
+    for col in _FORM_FIELDS:
+        tbl[col] = tbl[col].fillna(tbl["position"].map(medians[col]) if len(medians) else np.nan)
+    return tbl[_OUTPUT_COLUMNS + ["team", "fixture_id"]]
 
 
 def _apply_cold_start_priors(df: pd.DataFrame) -> pd.DataFrame:

@@ -20,8 +20,9 @@ from fpl_optimiser.features import build, opponent, prior_season
 from fpl_optimiser.ingest import opponent_stats, player_link, season_store
 
 
-def build_season(season: str, half_life: float = config.RECENCY_HALF_LIFE_GW) -> pd.DataFrame:
-    """The training table for one filed season, with last season as its prior."""
+def season_inputs(season: str) -> tuple[season_store.Season, pd.DataFrame | None, pd.DataFrame]:
+    """What building a season's features needs: the filed season, last season as its
+    prior (None if last season isn't filed) and the opponent profiles."""
     cur = season_store.load(season)
     prior = None
     prev_season = season_store.previous_season(season)
@@ -30,9 +31,14 @@ def build_season(season: str, half_life: float = config.RECENCY_HALF_LIFE_GW) ->
         links = player_link.link_players(prev.players, cur.players).links
         prior = prior_season.prior_table(prev.players, links,
                                          prev_gameweeks=prev.finished_gameweeks)
-
     opp = opponent_stats.opponent_stats(season)
     profiles = opponent.assign_archetypes(opponent.build_opponent_profiles(opp, cur.teams))
+    return cur, prior, profiles
+
+
+def build_season(season: str, half_life: float = config.RECENCY_HALF_LIFE_GW) -> pd.DataFrame:
+    """The training table for one filed season, with last season as its prior."""
+    cur, prior, profiles = season_inputs(season)
     tbl = build.build_training_table(cur.history, cur.fixtures, cur.players, profiles,
                                      half_life, prior=prior)
     tbl.insert(0, "season", season)

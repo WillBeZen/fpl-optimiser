@@ -11,7 +11,7 @@ HL = 8.0  # recency half-life used throughout
 
 # The column contract Section 3 trains on (see docs/02_feature_engineering.md).
 EXPECTED_COLUMNS = [
-    "id", "round", "web_name", "position", "was_home", "opponent_team",
+    "id", "round", "web_name", "position", "was_home", "opponent_team", "price",
     "target_points", "minutes",
     "form_points_pg", "form_minutes_pg", "form_xg_pg", "form_xa_pg", "form_xgi_pg",
     "form_defcon_pg", "form_bonus_pg", "form_bps_pg", "games_played", "form_starts_rate",
@@ -25,6 +25,7 @@ EXPECTED_COLUMNS = [
 # GW5 hasn't been played yet.
 # --------------------------------------------------------------------------- #
 FIXTURES = pd.DataFrame({
+    "fixture_id": [1, 2, 3, 4, 5, 6],
     "gameweek":   [1, 2, 3, 3, 4, 5],
     "finished":   [True, True, True, True, True, False],
     "home_id":    [1, 2, 1, 2, 3, 1],
@@ -38,6 +39,7 @@ PLAYERS = pd.DataFrame({
     "web_name": ["Mid", "Def", "Fwd", "Def2"],
     "position": ["MID", "DEF", "FWD", "DEF"],
     "team": [1, 3, 2, 1],
+    "price": [8.0, 5.0, 7.5, 4.5],
 })
 
 PROFILES = pd.DataFrame({
@@ -306,6 +308,46 @@ def test_last_season_fades_as_this_season_accumulates():
     quiet = _table().set_index(key)["form_points_pg"]
     pull = (loud - quiet).loc[10].dropna()               # GW2-4 (GW1 has no this-season form)
     assert len(pull) == 3 and (np.diff(pull.to_numpy()) < 0).all()
+
+
+# --------------------------------------------------------------------------- #
+# prediction rows for upcoming fixtures
+# --------------------------------------------------------------------------- #
+def _unplayed_from(gw: int) -> pd.DataFrame:
+    """FIXTURES as they looked before gameweek `gw` kicked off."""
+    fx = FIXTURES.copy()
+    later = fx["gameweek"] >= gw
+    fx.loc[later, "finished"] = False
+    fx.loc[later, ["home_score", "away_score"]] = np.nan
+    return fx
+
+
+@pytest.mark.parametrize("prior", [None, PRIOR], ids=["this season only", "with last season"])
+def test_prediction_rows_equal_the_training_rows_they_forecast(prior):
+    """Predicting GW4 before it is played gives each player exactly the features the
+    training table later gives his actual GW4 match (only price and targets differ)."""
+    pred = build.build_prediction_table(_history(), _unplayed_from(4), PLAYERS, PROFILES,
+                                        as_of_round=4, gameweeks=[4], half_life=HL, prior=prior)
+    actual = _table(prior=prior)
+    actual = actual[actual["round"] == 4]
+    key = ["id", "opponent_team"]
+    features = [c for c in EXPECTED_COLUMNS if c not in ("price", "target_points", "minutes")]
+    both = actual[key].merge(pred[key], on=key)
+    assert len(both) == 2                                   # players 10 and 20 played GW4
+    pd.testing.assert_frame_equal(
+        actual.merge(both, on=key)[features].reset_index(drop=True),
+        pred.merge(both, on=key)[features].reset_index(drop=True), check_dtype=False)
+
+
+def test_prediction_table_double_and_blank_gameweeks():
+    pred = build.build_prediction_table(_history(), _unplayed_from(3), PLAYERS, PROFILES,
+                                        as_of_round=3, gameweeks=[3, 4, 5], half_life=HL)
+    games = pred.groupby(["id", "round"]).size()
+    assert games[(20, 3)] == 2                              # team 3's double gameweek
+    assert (30, 4) not in games.index                       # team 2 blanks in GW4
+    assert games[(30, 5)] == 1
+    assert pred["target_points"].isna().all() and (pred["price"] > 0).all()
+    assert set(pred.loc[pred["id"] == 10, "fixture_id"].notna()) == {True}
 
 
 def test_training_table_empty_history():
