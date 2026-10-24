@@ -8,9 +8,9 @@ A two-engine Fantasy Premier League decision system:
 2. a **multi-week integer program** picks the squad, captain and transfers that
    maximise those points under FPL's rules.
 
-A **Claude advisor** then interprets the result against live football news and
-returns a 0–100 "how strongly to act" score. Everything is presented as one
-self-contained **HTML report** you open locally.
+A **Claude advisor** then checks the plan against live football news and returns a
+0–100 "how strongly to act" score. Everything lands in one self-contained **HTML
+report** you open locally.
 
 Full plan and rationale: [`docs/00_charter.md`](docs/00_charter.md).
 
@@ -21,27 +21,39 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env               # then add your ANTHROPIC_API_KEY
+cp .env.example .env               # then fill in the two lines below
 ```
+
+`.env` (git-ignored, never commit it):
+```
+FPL_TEAM_ID=1234567                # the number in your team's URL on the FPL site
+ANTHROPIC_API_KEY=sk-ant-...       # for the Claude news check
+```
+Both are optional: without them you still get predictions and the best squad from
+scratch, just no personal transfer plan or news check.
 
 > **macOS + iCloud:** don't keep the repo (or its venv) in an iCloud-synced folder
 > (Desktop or Documents with "Desktop & Documents Folders" on). iCloud offloads the
 > venv's files to the cloud and every `import` stalls while they download, so
 > `pytest` looks frozen. Keep the repo somewhere like `~/Developer`.
 
+## Every gameweek
+
+```bash
+python scripts/run_week.py --open
+```
+
+That one command refreshes FPL's data, predicts the next five gameweeks, plans your
+transfers (bank, spend, or take a −4 only if it clearly pays), asks Claude to check
+the news, and opens the report. `python scripts/run_week.py --help` lists the
+options (e.g. `--free-transfers 2` if the estimate is off, `--backtest` to re-check
+the model).
+
 ## Check it works
 
 ```bash
-python -m pytest -q                # offline test suite, a few seconds
+python -m pytest -q                # 88 offline tests, ~20 seconds
 python config.py                   # prints "config OK"
-```
-
-## Use it
-
-```bash
-python scripts/pull_fpl.py             # file the live FPL season into data/raw/fpl/<season>/
-python scripts/build_features.py       # training table across seasons -> data/processed/
-python scripts/make_report.py --open   # reports/fpl_report.html (works offline)
 ```
 
 ## Layout
@@ -49,14 +61,15 @@ python scripts/make_report.py --open   # reports/fpl_report.html (works offline)
 ```
 config.py                  all FPL rules + tunable dials  (start here)
 fpl_optimiser/
-  ingest/                  Section 1 — FPL API, season store, cross-season links, opponent stats
-  features/                Section 2 — recency, opponent archetypes, training table, last-season
-                           prior, multi-season table, player types
-  model/                   Section 3 — minutes & points prediction, backtest
-  optimise/                Sections 4–5 — squad MILP + multi-week planner
-  claude/                  Section 6 — Claude advisor
+  ingest/                  Section 1 — FPL API, season store, cross-season links,
+                           your team, rules check, opponent stats
+  features/                Section 2 — recency, opponent archetypes, training table,
+                           last-season prior, multi-season table, player types
+  model/                   Section 3 — minutes + points models, backtest, forecasts
+  optimise/                Sections 4–5 — squad MILP + multi-week transfer planner
+  claude/                  Section 6 — the Claude news check
   app/                     Section 7 — charts + the HTML report
-scripts/                   pull_fpl, build_features, make_report, verify_setup
+scripts/                   run_week (weekly), pull_fpl, build_features, make_report, verify_setup
 docs/                      one plain-English write-up per section
 tests/                     offline: mock payloads and tiny synthetic seasons, never the network
 data/                      raw (filed seasons) / processed / cache  (git-ignored)
@@ -65,14 +78,12 @@ reports/                   the generated HTML report  (git-ignored)
 
 ## Build status
 
-Sections 0–2 are done; the HTML report (Section 7) is started. Each section adds its
-module **and** its doc, ticked off in the charter as we go.
+Sections 0–7 are built and tested. Next: chip planning, and the full 2025/26 match
+data from a public archive (see the charter's "What's next").
 
 ## Running data pulls
 
 Live data comes from `fantasy.premierleague.com`, which you call from your own
-machine. `pull_fpl.py` is polite by design: one keep-alive connection, a short
-pause between player requests, retries that back off, and re-runs that skip files
-fetched in the last 12 hours. A finished season is frozen and never re-pulled. If
-you switch the opponent source to FBref, `soccerdata` caches and rate-limits its
-requests: don't disable that.
+machine. The pull is polite by design: one keep-alive connection, a short pause
+between player requests, retries that back off, and re-runs that skip files fetched
+in the last 12 hours. A finished season is frozen and never re-pulled.

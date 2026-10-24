@@ -99,7 +99,7 @@ them (`is_cold`, under 3 games this season). A player with a 2025/26 record gets
 last season as his prior (section 4). Anyone still without form is filled with
 **position-median** form, taken (like everything else) only from rows in
 **earlier** rounds: a GW10 debutant gets his position's median form over GW1–9.
-Rows with nothing earlier at all stay NaN (LightGBM handles NaN natively).
+Rows with nothing earlier at all stay NaN (the gradient-boosted trees handle NaN natively).
 
 ## 4. Last season as a prior (`features/prior_season.py`)
 
@@ -173,7 +173,7 @@ Not a model input yet: they are for looking at.
 - `tests/test_player_profiles.py` — per-90 blending across seasons and types that
   split by style and rank by points.
 
-## What's deferred to Section 3
-The minutes model (will he play, and for how long), the points model itself
-(LightGBM on this table, recency-weighted samples), and the walk-forward backtest
-that tells you whether any of these choices actually help.
+## Next: Section 3
+The minutes and points models train on this table (with its `sample_weight`), and
+`build_prediction_table` builds the same features for upcoming fixtures — see
+`docs/03_prediction_model.md`, including the walk-forward backtest.

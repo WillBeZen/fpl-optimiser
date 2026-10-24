@@ -43,7 +43,8 @@ human-readable explanation and for Claude's narrative.
 | Seasons | Players are linked across seasons by FPL's **permanent player code** (ids change every season), with name + date of birth + nationality as fallbacks. Last season enters as a recency-weighted **prior** and as down-weighted training rows. |
 | Planning | **Multi-week from v1** (not a later add-on) |
 | Claude advisor | **Anthropic API with web search** for live news |
-| Interface | One **self-contained HTML report** (Plotly, works offline), built by `scripts/make_report.py` |
+| Model | Gradient-boosted trees (scikit-learn HistGradientBoosting): a minutes model and a points model, `xp = P(plays) × points if he plays` |
+| Interface | One **self-contained HTML report** (Plotly, works offline), built each week by `scripts/run_week.py` |
 
 ## Verified facts the build rests on
 
@@ -61,9 +62,9 @@ human-readable explanation and for Claude's narrative.
   combined clearances/blocks/interceptions/tackles → 2 pts; mid/fwd: 12 incl. ball
   recoveries → 2 pts).
 
-> **Not yet confirmed (revisit before GW1):** the exact 2026/27 rule set is not
-> published yet (FPL usually announces in late July). Every rule lives in
-> `config.py`, so updating is a one-file edit.
+> **Confirmed:** `config.py` matches FPL's own published 2026/27 rules (its
+> `game_config`); one stale rule was fixed: a goalkeeper goal is worth **10** points.
+> `ingest/rules_check.py` re-checks after every pull and warns if FPL changes a rule.
 
 ## Build checklist
 
@@ -77,14 +78,27 @@ human-readable explanation and for Claude's narrative.
   characteristic vectors + archetypes; player×opponent interactions; leakage-free
   cold-start priors; last season as a prior; one multi-season table with sample
   weights; player types (for the report).
-- [ ] **3 — Prediction model.** Minutes model, then points-component model
-  (LightGBM, recency-weighted); walk-forward backtest vs a naive baseline.
-- [ ] **4 — Optimisation.** Single-gameweek MILP (PuLP): squad, XI, captain under
-  all hard rules.
-- [ ] **5 — Multi-week planning.** Extend to a rolling horizon; bank vs spend vs
-  −4 hit (only when the gain over the horizon clears the threshold); chip timing.
-- [ ] **6 — Claude advisor.** Anthropic API + web search → structured JSON
-  recommendation with a 0–100 action score; news adjusts, never overrides, the maths.
-- [ ] **7 — Interface.** A self-contained HTML report over the modules. *Started:*
-  the report exists with player types, attacking threat, risers and fallers, value
-  and the season link; Sections 3–6 add their sections as they are built.
+- [x] **3 — Prediction model.** Minutes model (P(plays), P(60+)) and a points model
+  for when he plays: gradient-boosted trees (scikit-learn's HistGradientBoosting,
+  the LightGBM algorithm without its macOS system dependency), sample-weighted
+  across seasons. Walk-forward backtest: its top-11 picks beat recency-weighted form
+  by ~11 points a gameweek. FPL injury flags applied to predictions.
+- [x] **4 — Optimisation.** Single-gameweek MILP (PuLP + bundled CBC): squad, XI,
+  captain and vice under all hard rules.
+- [x] **5 — Multi-week planning.** One MILP over a rolling 5-week horizon from your
+  real squad (public FPL data: picks, bank, estimated free transfers, FPL selling
+  prices); bank vs spend vs −4 hit only when the gain clears the threshold.
+  *Not yet:* chip timing.
+- [x] **6 — Claude advisor.** Claude Opus 5.5 + web search → a strict structured
+  answer: 0–100 action score, verdict, flagged players with sources; news adjusts,
+  never overrides, the maths. Refusal fallback on; never crashes the run.
+- [x] **7 — Interface.** `scripts/run_week.py` (one command a week) → one
+  self-contained HTML report: this week's plan, the news check, the best squad from
+  scratch, predictions, the model check, and the player analysis.
+
+## What's next
+- **Chips:** plan the wildcard, free hit, bench boost and triple captain.
+- **Full 2025/26 match data** from a public archive (only the top 50 players' matches
+  were saved before the API moved on), for a stronger, less biased model.
+- **Richer opponent stats** (team xG conceded, pressing) if a source becomes
+  reachable; the opponent adapter takes it without other changes.

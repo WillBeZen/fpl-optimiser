@@ -9,8 +9,7 @@ pandas>=3.0,<4             # [3.0]
 numpy>=2.2,<3              # [2.4]
 
 # --- modelling (Sections 2-3) ---
-scikit-learn>=1.6,<2       # [1.9]
-lightgbm>=4.5,<5           # if macOS import complains about OpenMP: brew install libomp  [4.6]
+scikit-learn>=1.6,<2       # k-means + the gradient-boosted trees (HistGradientBoosting)  [1.9]
 
 # --- optimisation (Sections 4-5) ---
 pulp>=3.0,<4               # 4.0 stops bundling the CBC solver  [3.3]
