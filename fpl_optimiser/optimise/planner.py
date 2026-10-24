@@ -18,16 +18,24 @@ Objective, each gameweek weighted config.HORIZON_DECAY ** (weeks ahead):
                                            this: the margin for prediction error)
   + config.FREE_TRANSFER_VALUE per transfer still banked after the last gameweek
 Chips (wildcard, free hit, bench boost, triple captain) are not planned yet.
+
+Before solving, players who can't be optimal are dropped (optimise/pool.py): the
+same answer, several times faster. `Plan.stats` records the problem's size and
+solve time for the report.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import pandas as pd
 import pulp
 
 import config
+from fpl_optimiser.optimise import pool
 from fpl_optimiser.optimise.squad import _present, solve
+
+_FT_TIEBREAK = 1e-4
 
 
 @dataclass
@@ -41,6 +49,7 @@ class Week:
     team: pd.DataFrame          # the 15, XI/bench, captain, ordered like a team sheet
     xp: float                   # XI + captain's double, this gameweek
     formation: str
+    free_after: int = 0         # free transfers carried into the next gameweek
 
     @property
     def captain(self) -> str:
@@ -53,6 +62,9 @@ class Plan:
     xp: float = 0.0             # expected points over the horizon (undiscounted, before hits)
     hit_cost: int = 0           # points spent on hits
     status: str = ""
+    free_end: int = 0           # free transfers still banked after the last gameweek
+    objective: float = 0.0      # the solver's objective (decayed, with penalties and bonus)
+    stats: dict = field(default_factory=dict)   # problem size and solve time
 
     @property
     def net(self) -> float:
@@ -61,10 +73,10 @@ class Plan:
 
 def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: float,
          free_transfers: int, sell_prices: dict[int, float] | None = None,
-         max_transfers_per_gw: int | None = None,
+         max_transfers_per_gw: int | None = None, moves_now: int | None = None,
          decay: float = config.HORIZON_DECAY, hit_penalty: float = config.HIT_THRESHOLD_POINTS,
          ft_value: float = config.FREE_TRANSFER_VALUE,
-         bench_weight: float = config.BENCH_WEIGHT) -> Plan:
+         bench_weight: float = config.BENCH_WEIGHT, prune: bool = True) -> Plan:
     """The best transfer plan over the gameweeks in `xp`.
 
     xp            one row per (player id, gw) with column `xp` (predict.Forecast.xp)
@@ -72,8 +84,14 @@ def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: fl
     squad_ids     your 15 player ids now; bank in £m; free_transfers available now
     sell_prices   what each of your players sells for (default: today's price)
     max_transfers_per_gw  0 = "no transfers" (the baseline to compare a plan with)
+    moves_now     exactly this many transfers in the first gameweek (for what-ifs)
+    prune         drop players who can't be optimal first (pool.py); same answer, faster
     """
+    started = time.perf_counter()
     gws = sorted(xp["gw"].unique())
+    n_players = xp["id"].nunique()
+    if prune:
+        xp = xp[xp["id"].isin(pool.prune(xp, players, keep=squad_ids))]
     pts = xp.pivot_table(index="id", columns="gw", values="xp", aggfunc="sum").reindex(columns=gws)
     c = players.set_index("id").loc[lambda d: d.index.isin(pts.index) | d.index.isin(squad_ids)]
     pts = pts.reindex(c.index).fillna(0.0)
@@ -100,7 +118,10 @@ def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: fl
                                                           + bench_weight * (sq[i, t] - st[i, t]))
                         for i, t in key)
              - hit_penalty * pulp.lpSum(hits[t] for t in T)
-             + ft_value * ft[len(gws)])
+             + ft_value * ft[len(gws)]
+             # tie-break only: report the free transfers you'd really have each week
+             # (otherwise any value up to the true count is equally "optimal")
+             + _FT_TIEBREAK * pulp.lpSum(ft[t] for t in range(1, len(gws))))
 
     prob += ft[0] == min(max(int(free_transfers), 0), config.MAX_BANKED_TRANSFERS)
     for t in T:
@@ -110,6 +131,8 @@ def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: fl
         prob += ft[t + 1] <= ft[t] - n_moves + hits[t] + config.FREE_TRANSFERS_PER_GW
         if max_transfers_per_gw is not None:
             prob += n_moves <= max_transfers_per_gw
+        if moves_now is not None and t == 0:
+            prob += n_moves == moves_now
         prob += money[t] == ((bank if t == 0 else money[t - 1])
                              + pulp.lpSum(sell_price[i] * sell[i, t] - buy_price[i] * buy[i, t] for i in ids))
         for i in ids:
@@ -133,11 +156,17 @@ def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: fl
         for club, members in c.groupby("team_name").groups.items():
             prob += pulp.lpSum(sq[i, t] for i in members) <= config.MAX_PER_CLUB
 
+    built = time.perf_counter()
     status = solve(prob)
     if status != "Optimal":
         raise ValueError(f"no legal plan found (solver: {status}) — check the squad and bank")
 
-    out = Plan(status=status)
+    out = Plan(status=status, free_end=int(round(ft[len(gws)].value())),
+               objective=float(pulp.value(prob.objective)),
+               stats={"players": n_players, "candidates": len(ids), "gameweeks": len(gws),
+                      "variables": len(prob.variables()), "constraints": prob.numConstraints(),
+                      "binary": sum(v.cat == pulp.LpInteger and v.upBound == 1 for v in prob.variables()),
+                      "build_seconds": built - started, "solve_seconds": time.perf_counter() - built})
     info = c.reset_index()[["id", "web_name", "team_name", "position", "price"]]
     for t, gw in enumerate(gws):
         chosen = [i for i in ids if sq[i, t].value() > 0.5]
@@ -157,7 +186,7 @@ def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: fl
                 xp=[pts.at[i, gw] for i in moved_in]),
             free_transfers=int(round(ft[t].value())), hits=int(round(hits[t].value())),
             bank_after=round(money[t].value(), 1), team=sheet.players, xp=sheet.xp,
-            formation=sheet.formation)
+            formation=sheet.formation, free_after=int(round(ft[t + 1].value())))
         out.weeks.append(week)
     out.xp = sum(w.xp for w in out.weeks)
     out.hit_cost = config.TRANSFER_HIT_COST * sum(w.hits for w in out.weeks)
