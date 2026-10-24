@@ -5,6 +5,7 @@ import re
 import pandas as pd
 import pytest
 
+import config
 from fpl_optimiser.app import charts, report
 from fpl_optimiser.features import player_profiles as pp
 from tests.test_multi_season import two_seasons  # noqa: F401  (pytest fixture)
@@ -65,8 +66,28 @@ def test_build_report_from_a_filed_store(two_seasons):
     assert r.title.endswith("2026/27")
     assert {"Linked from last season", "New arrivals"} <= {label for label, _, _ in r.tiles}
     assert {"link", "next"} <= {s.id for s in r.sections}
+    assert r.sections[-1].id == "glossary"                  # the glossary closes the page
     assert "arrivals" in r.figures
-    report.render(r)                                        # renders without error
+    page = report.render(r)
+    assert '<a href="#glossary">Glossary</a>' in page and 'id="gloss-filter"' in page
+
+
+def test_glossary_terms_are_unique_and_quote_the_live_settings(monkeypatch):
+    from fpl_optimiser.app import glossary
+    terms = [term for _, ts in glossary.groups() for term, _ in ts]
+    assert len(terms) == len(set(terms)) >= 40
+    assert len({glossary.slug(t) for t in terms}) == len(terms)          # every anchor is unique
+    assert all(text.strip() for _, ts in glossary.groups() for _, text in ts)
+    assert glossary.slug("Hit (-4)") == "hit-4"
+
+    monkeypatch.setattr(config, "HIT_THRESHOLD_POINTS", 7.5)            # read at build time
+    monkeypatch.setattr(config, "RECENCY_HALF_LIFE_GW", 6.0)
+    text = dict(t for _, ts in glossary.groups() for t in ts)
+    assert "more than 7.5 expected points" in text["Hit threshold"]
+    assert "6 gameweeks ago counts half" in text["Form (recency weighting)"]
+
+    page = report.render(report.Report("T", "S", sections=[report.glossary_section()]))
+    assert 'id="g-hit-threshold"' in page and "<dt>xG (expected goals)</dt>" in page
 
 
 # --------------------------------------------------------------------------- #
@@ -110,8 +131,9 @@ def test_week_sections_with_a_plan_and_a_news_check():
                                    "source": "javascript:alert(1)"},
                                   {"player": "Ok", "status": "fit", "note": "-",
                                    "source": "https://example.com/a"}],
-                    adjustments=["swap"], risks=[], model="m", searches=2,
-                    sources=[{"title": "A", "url": "https://example.com/a"}])
+                    adjustments=["swap"], risks=[], model="claude-sonnet-5-5", searches=2,
+                    sources=[{"title": "A", "url": "https://example.com/a"}],
+                    input_tokens=12_000, output_tokens=3_000)
     r, page = _render(_week(advice=advice))
     assert [s.id for s in r.sections] == ["week", "advice", "wildcard", "predictions"]
     labels = {label: value for label, value, _ in r.tiles}
@@ -121,6 +143,7 @@ def test_week_sections_with_a_plan_and_a_news_check():
     assert HOSTILE not in rest and "&lt;img src=x" in rest              # escaped everywhere
     assert 'href="javascript' not in page                                # unsafe link dropped
     assert '<a href="https://example.com/a" target="_blank" rel="noopener noreferrer">' in page
+    assert "12,000 input and 3,000 output tokens, about $0.07" in page   # 0.024 + 0.03 + 2 searches
 
 
 def test_week_sections_without_a_team_or_the_advisor():

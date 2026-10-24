@@ -30,6 +30,32 @@ SUBMIT = "submit_advice"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 _MAX_CONTINUATIONS = 4      # web search can pause a long turn; resume at most this often
 
+# Anthropic list prices for the cost readout: $ per million tokens (input, output),
+# and $ per web search ($10 per 1,000). Thinking is billed as output; the pages a
+# search returns arrive as input tokens.
+PRICES = {"claude-sonnet-5-5": (2.00, 10.00), "claude-opus-5-5": (4.00, 20.00)}
+SEARCH_PRICE = 10.00 / 1000
+
+
+def api_message(exc) -> str:
+    """The human part of an Anthropic API error ("Your credit balance is too low ..."),
+    not the raw JSON body."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            return str(err["message"])
+    return str(getattr(exc, "message", exc))
+
+
+def approx_cost(model: str, input_tokens: int, output_tokens: int, searches: int = 0) -> float | None:
+    """Rough $ cost at list prices (None for a model without a listed price)."""
+    if model not in PRICES:
+        return None
+    price_in, price_out = PRICES[model]
+    return (input_tokens * price_in + output_tokens * price_out) / 1e6 + searches * SEARCH_PRICE
+
+
 ADVICE_TOOL = {
     "name": SUBMIT,
     "description": "Submit your final assessment of this week's FPL plan. Call exactly once, "
@@ -97,10 +123,17 @@ class Advice:
     searches: int = 0
     sources: list[dict] = field(default_factory=list)    # {"title", "url"} from the searches
     error: str = ""                                     # set when no advice could be produced
+    input_tokens: int = 0                               # across every request this run made
+    output_tokens: int = 0
 
     @property
     def ok(self) -> bool:
         return not self.error
+
+    @property
+    def cost(self) -> float | None:
+        """Approximate $ for this run: tokens plus web searches, at list prices."""
+        return approx_cost(self.model, self.input_tokens, self.output_tokens, self.searches)
 
 
 def unavailable(reason: str) -> Advice:
@@ -183,7 +216,7 @@ def advise(user_brief: str, client=None, model: str = config.ADVISOR_MODEL,
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches}, ADVICE_TOOL]
     messages = [{"role": "user", "content": user_brief}]
     sources: list[dict] = []
-    searches = 0
+    searches = tokens_in = tokens_out = 0
     nudged = False
     for _ in range(_MAX_CONTINUATIONS + 2):
         try:
@@ -196,13 +229,15 @@ def advise(user_brief: str, client=None, model: str = config.ADVISOR_MODEL,
         except anthropic.RateLimitError:
             return unavailable("rate limited by the Anthropic API; try again in a minute")
         except anthropic.APIStatusError as exc:
-            return unavailable(f"Anthropic API error {exc.status_code}: {exc.message}")
+            return unavailable(f"Anthropic API error {exc.status_code}: {api_message(exc)}")
         except anthropic.APIConnectionError:
             return unavailable("couldn't reach the Anthropic API (network)")
 
         sources += _sources(response.content)
         usage = getattr(response, "usage", None)
         searches += getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0) or 0
+        tokens_in += getattr(usage, "input_tokens", 0) or 0
+        tokens_out += getattr(usage, "output_tokens", 0) or 0
 
         if response.stop_reason == "refusal":
             return unavailable("Claude declined this request")
@@ -213,7 +248,8 @@ def advise(user_brief: str, client=None, model: str = config.ADVISOR_MODEL,
             return Advice(action_score=max(0, min(100, int(a["action_score"]))), verdict=a["verdict"],
                           summary=a["summary"], captain_ok=a["captain_ok"], captain_note=a["captain_note"],
                           player_flags=a["player_flags"], adjustments=a["adjustments"], risks=a["risks"],
-                          model=getattr(response, "model", model), searches=searches, sources=sources)
+                          model=getattr(response, "model", model), searches=searches, sources=sources,
+                          input_tokens=tokens_in, output_tokens=tokens_out)
         if response.stop_reason == "pause_turn":           # a long search turn paused: resume it
             messages = [messages[0], {"role": "assistant", "content": response.content}]
             continue

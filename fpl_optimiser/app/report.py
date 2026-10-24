@@ -6,8 +6,9 @@ and `write()` produces a single HTML file with Plotly embedded inline, so it wor
 offline and can be archived or shared as-is. The page follows the viewer's
 light/dark setting and has a toggle.
 
-Later sections (predictions, squad optimiser, transfers, the Claude advisor) slot in
-as they are built: each is one more `Section` added to the `Report`.
+This week's sections (the plan, Claude's news check, predictions) come first when
+the weekly run passes them in (`WeekResults`); the analysis follows, and a glossary
+of every term closes the page. Each part is one `Section` added to the `Report`.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import plotly.io as pio
 from plotly.offline import get_plotlyjs
 
 import config
-from fpl_optimiser.app import charts
+from fpl_optimiser.app import charts, glossary
 from fpl_optimiser.features import player_profiles
 from fpl_optimiser.features.player_profiles import LABELS
 from fpl_optimiser.ingest import player_link, season_store
@@ -105,6 +106,21 @@ def html_table(headers: list[str], rows: list[list[str]]) -> str:
     head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
     body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
     return f'<div class="tbl-wrap"><table class="tbl"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+
+
+def glossary_section() -> Section:
+    """Every term the page uses, grouped, each with its own #g-<slug> anchor, plus a
+    filter box (the page's script hides the terms that don't match)."""
+    parts = ['<input type="search" id="gloss-filter" placeholder="Filter terms, e.g. hit or xG" '
+             'aria-label="Filter the glossary" autocomplete="off">']
+    for title, terms in glossary.groups():
+        items = "".join(f'<div class="term" id="g-{_esc(glossary.slug(term))}"><dt>{_esc(term)}</dt>'
+                        f"<dd>{_esc(text)}</dd></div>" for term, text in terms)
+        parts.append(f'<div class="gloss-group"><h3>{_esc(title)}</h3><dl class="gloss">{items}</dl></div>')
+    parts.append('<p class="note" id="gloss-none" hidden>No terms match.</p>')
+    return Section("glossary", "Glossary",
+                   "What the terms on this page mean. Numbers quoted here are the settings this "
+                   "report was built with (config.py).", [card("".join(parts))])
 
 
 def team_sheet(team: pd.DataFrame, fixtures: pd.Series | None = None) -> pd.DataFrame:
@@ -205,9 +221,12 @@ def _add_week(r: Report, w: WeekResults) -> None:
         adv.blocks.append(note(f"Advisor unavailable: {a.error}"))
     else:
         tiles.append(("News check", f"{a.action_score}/100", f"Claude says: {a.verdict}"))
+        spend = (f" This check used {a.input_tokens:,} input and {a.output_tokens:,} output "
+                 f"tokens, about ${a.cost:.2f} at list prices."
+                 if a.cost is not None and (a.input_tokens or a.output_tokens) else "")
         adv.intro = (f"{a.model} read the latest news for the players involved "
                      f"({a.searches} web searches) and scored how strongly to act on this "
-                     "week's moves. News adjusts, never overrides, the maths.")
+                     "week's moves. News adjusts, never overrides, the maths." + spend)
         verdict = (f'<div class="verdict"><div class="value">{a.action_score}<span>/100</span></div>'
                    f'<div><p class="big">{_esc(a.verdict.capitalize())}</p><p>{_esc(a.summary)}</p>'
                    f'<p class="note">Captain: {_esc(a.captain_note)}</p></div></div>')
@@ -381,21 +400,24 @@ def build_report(season: str | None = None, week: WeekResults | None = None) -> 
             "nationality + surname. Only one-to-one matches are accepted.",
             [card(r.chart("arrivals", charts.count_bars, arrivals, "New arrivals by club", "Players")),
              card(f'<div class="tbl-wrap">{methods.to_html(index=False, border=0, classes="tbl")}</div>'
-                  f'<div class="tbl-wrap">{moved.to_html(index=False, border=0, classes="tbl")}</div>'
+                  f'<div class="tbl-wrap">{moved.to_html(index=False, border=0, classes="tbl", na_rep="–")}</div>'
                   + note(f"{s['departures']} players from {nice(prev_season)} are not in "
                          f"{nice(season)}'s game; {s['changed_team']} linked players changed club and "
                          f"{s['changed_position']} changed FPL position; {s['rejected']} candidate "
                          "matches were rejected as ambiguous or contradictory."), pair=True)]))
 
-    # --- what comes next ----------------------------------------------------------
-    r.sections.append(Section(
-        "next", "Coming next",
-        "Expected points per player and gameweek (Section 3), the best squad, XI and captain "
-        "(Section 4), when to transfer, bank or take a hit (Section 5), and Claude's read of the "
-        "news with a 0-100 'how strongly to act' score (Section 6) will appear here as they are built."))
+    # --- this week's plan lives in the weekly run ---------------------------------------
+    if week is None:
+        r.sections.append(Section(
+            "next", "This week's plan",
+            "This page has the analysis only. For expected points, your transfer plan and "
+            "Claude's news check, run: python scripts/run_week.py --open"))
+
+    r.sections.append(glossary_section())
 
     r.footer = (f"Generated {datetime.now():%d %b %Y %H:%M} from data/raw/fpl/{season}"
-                + (f" and {prev_season}" if prev else "") + ". Rebuild: python scripts/make_report.py")
+                + (f" and {prev_season}" if prev else "")
+                + (". Rebuild: python scripts/run_week.py" if week else ". Rebuild: python scripts/make_report.py"))
     return r
 
 
@@ -452,6 +474,15 @@ p.big { font-size:18px; font-weight:600; }
 .card h3 { font-size:15px; font-weight:600; margin:16px 10px 4px; }
 .card ul { margin:4px 0 8px; padding-left:28px; }
 footer { color:var(--muted); font-size:12px; margin-top:48px; }
+[hidden] { display:none !important; }
+#gloss-filter { font:inherit; font-size:14px; color:var(--ink); background:var(--page);
+                border:1px solid var(--border); border-radius:8px; padding:6px 10px;
+                margin:10px 10px 4px; width:min(360px, calc(100% - 20px)); }
+.gloss { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+         gap:0 28px; margin:0 10px 8px; }
+.gloss dt { font-weight:600; }
+.gloss dd { margin:2px 0 12px; color:var(--ink2); font-size:14px; }
+.term:target dt { color:var(--accent); }
 """
 
 _JS = """
@@ -481,6 +512,24 @@ _JS = """
   });
   media.addEventListener('change', function () { if (choice === 'auto') { draw(); } });
   draw();
+})();
+(function () {
+  var box = document.getElementById('gloss-filter');
+  if (!box) { return; }
+  box.addEventListener('input', function () {
+    var q = box.value.trim().toLowerCase(), any = false;
+    document.querySelectorAll('.gloss-group').forEach(function (g) {
+      var shown = 0;
+      g.querySelectorAll('.term').forEach(function (t) {
+        var hit = !q || t.textContent.toLowerCase().indexOf(q) !== -1;
+        t.hidden = !hit;
+        if (hit) { shown += 1; }
+      });
+      g.hidden = shown === 0;
+      if (shown) { any = true; }
+    });
+    document.getElementById('gloss-none').hidden = any;
+  });
 })();
 """
 

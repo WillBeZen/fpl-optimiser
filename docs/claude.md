@@ -24,12 +24,13 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (88 tests today)
+python -m pytest -q                            # MUST stay green (91 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
 python scripts/build_features.py               # just the multi-season training table -> data/processed/
 python scripts/make_report.py --open           # just the analysis report
 python scripts/verify_setup.py                 # live health check (FPL, opponent source, rules)
+python scripts/check_claude.py                 # one tiny Claude request: is the key working?
 ```
 
 Run everything from the repo root (a root `conftest.py` puts it on `sys.path`, so
@@ -71,12 +72,14 @@ fpl_optimiser/
   app/
     charts.py                 Plotly figure builders (light + dark, validated palette) [done]
     report.py                 the self-contained HTML report (S7)                [done]
+    glossary.py               the report's glossary (values read from config)    [done]
 scripts/
   run_week.py                 the weekly run (everything, one command)
   pull_fpl.py                 files the live season (polite, resumable)
   build_features.py           builds the multi-season training table
   make_report.py              writes reports/fpl_report.html
   verify_setup.py             environment + live-source health check
+  check_claude.py             one tiny Claude request to test the API key
 docs/                         00_charter + one doc per section
 tests/                        pytest; MOCK payloads / tiny synthetic seasons, never the network
 data/                         raw (filed seasons) / processed / cache (git-ignored)
@@ -166,6 +169,9 @@ reports/                      generated HTML (git-ignored)
 - **Claude Sonnet 5.5 rejects forced `tool_choice`** (`any`/`tool`): the advisor uses
   `auto` + a strict `submit_advice` tool + one nudge. Web search can end a turn with
   `pause_turn`; resend `[user, assistant(content)]` to resume.
+- **An API key can be valid but unusable**: with no credit on the account every
+  request is a 400 ("Your credit balance is too low ..."). `check_claude.py` tells you
+  in one cheap call; `advisor.api_message` turns API errors into that plain sentence.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your
   history; one-off FPL top-ups aren't visible, so `run_week.py --free-transfers N`
   overrides it.

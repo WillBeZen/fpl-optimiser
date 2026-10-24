@@ -4,6 +4,7 @@ from types import SimpleNamespace as NS
 import anthropic
 import httpx
 import pandas as pd
+import pytest
 
 import config
 from fpl_optimiser.claude import advisor
@@ -14,9 +15,10 @@ ADVICE = {"action_score": 150, "verdict": "act", "summary": "Go ahead.", "captai
                             "source": "https://example.com/news"}]}
 
 
-def _response(stop_reason, *blocks, searches=0):
+def _response(stop_reason, *blocks, searches=0, tokens=(0, 0)):
     return NS(stop_reason=stop_reason, content=list(blocks), model=config.ADVISOR_MODEL,
-              usage=NS(server_tool_use=NS(web_search_requests=searches)))
+              usage=NS(server_tool_use=NS(web_search_requests=searches),
+                       input_tokens=tokens[0], output_tokens=tokens[1]))
 
 
 def _search_result(*urls):
@@ -105,3 +107,24 @@ def test_refusals_and_api_trouble_never_crash_the_run():
     assert "declined" in advisor.advise("b", client=FakeClient(_response("refusal"))).error
     down = anthropic.APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com"))
     assert "network" in advisor.advise("b", client=FakeClient(error=down)).error
+
+
+def test_tokens_add_up_across_requests_and_cost_includes_searches():
+    paused = _response("pause_turn", _search_result("https://a.example"), searches=1, tokens=(1000, 200))
+    client = FakeClient(paused, _response("tool_use", SUBMIT, searches=1, tokens=(3000, 800)))
+    a = advisor.advise("brief", client=client)
+    assert (a.input_tokens, a.output_tokens, a.searches) == (4000, 1000, 2)
+    price_in, price_out = advisor.PRICES[config.ADVISOR_MODEL]
+    assert a.cost == pytest.approx((4000 * price_in + 1000 * price_out) / 1e6 + 2 * advisor.SEARCH_PRICE)
+    assert advisor.approx_cost("claude-sonnet-5-5", 1_000_000, 100_000, searches=2) == pytest.approx(3.02)
+    assert advisor.approx_cost("some-unpriced-model", 10, 10) is None
+
+
+def test_an_empty_credit_balance_is_reported_in_plain_words():
+    msg = "Your credit balance is too low to access the Anthropic API."
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    broke = anthropic.BadRequestError(
+        "Error code: 400 - {...}", response=httpx.Response(400, request=req),
+        body={"type": "error", "error": {"type": "invalid_request_error", "message": msg}})
+    a = advisor.advise("b", client=FakeClient(error=broke))
+    assert not a.ok and a.error == f"Anthropic API error 400: {msg}"

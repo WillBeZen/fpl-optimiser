@@ -12,8 +12,13 @@ trust them this week.
 ```bash
 # in .env (never commit it):
 ANTHROPIC_API_KEY=sk-ant-...
+python scripts/check_claude.py         # one tiny request: is the key working? (a fraction of a cent)
 python scripts/run_week.py --open      # the news check runs as step 5
 ```
+
+`check_claude.py` sends a one-word prompt and prints the reply, the tokens used and
+their cost, or a plain reason it failed (key rejected, no credit on the account,
+model not allowed, rate limit, network). It never prints the key.
 
 ## How it works (`fpl_optimiser/claude/advisor.py`)
 `brief()` writes the prompt: the gameweek and deadline, this week's transfers out and
@@ -41,8 +46,18 @@ API re-runs it on Anthropic's recommended fallback model. Any API trouble (missi
 rejected key, rate limit, network) returns an `Advice` with `error` set, so the
 weekly run still produces its report, showing "Advisor unavailable: <reason>".
 
-**Cost.** One request a week with a handful of searches. Change `ADVISOR_MODEL` or
-`ADVISOR_EFFORT` in `config.py` to trade depth for cost.
+**Cost.** One request a week with a handful of searches. Each run adds up the tokens
+of every request it made (`Advice.input_tokens`, `output_tokens`) and `Advice.cost`
+estimates the bill at list prices: $2 / $10 per million input / output tokens for
+Sonnet 5.5 (thinking counts as output, and the pages a search returns as input),
+plus $0.01 per web search. The terminal and the report both show it. For a cheaper
+check, lower the effort and the searches for one run:
+```bash
+python scripts/run_week.py --advisor-effort low --max-searches 2
+```
+or change `ADVISOR_EFFORT` / `ADVISOR_MAX_SEARCHES` / `ADVISOR_MODEL` in `config.py`
+for every run. API errors are shown in plain words (e.g. "Your credit balance is too
+low ..."), not as the raw JSON body.
 
 ## In the report
 The "News check (Claude)" section shows the score, the verdict and summary, a table
@@ -55,4 +70,6 @@ untrusted text: it's escaped, and only `http(s)` links become clickable.
 captain and FPL flags; the advice is read from the `submit_advice` call (score clamped
 to 0–100); the request is well-formed (model, effort, web search, strict tool, auto
 tool choice, fallback beta); a paused search turn is resumed; a prose answer gets one
-nudge and then gives up; refusals and network errors never crash the run.
+nudge and then gives up; refusals and network errors never crash the run; tokens add
+up across requests and the cost includes searches; an empty credit balance is
+reported in plain words.

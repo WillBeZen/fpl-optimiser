@@ -47,13 +47,15 @@ That one command refreshes FPL's data, predicts the next five gameweeks, plans y
 transfers (bank, spend, or take a −4 only if it clearly pays), asks Claude to check
 the news, and opens the report. `python scripts/run_week.py --help` lists the
 options (e.g. `--free-transfers 2` if the estimate is off, `--backtest` to re-check
-the model).
+the model, `--advisor-effort low --max-searches 2` for a cheaper news check). The
+report ends with a glossary of every term it uses.
 
 ## Check it works
 
 ```bash
-python -m pytest -q                # 88 offline tests, ~20 seconds
+python -m pytest -q                # 91 offline tests, ~20 seconds
 python config.py                   # prints "config OK"
+python scripts/check_claude.py     # one tiny Claude request: is your key working?
 ```
 
 ## Layout

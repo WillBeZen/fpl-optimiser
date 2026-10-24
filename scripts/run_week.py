@@ -8,6 +8,7 @@ run_week.py — the weekly run, in one command:
     python scripts/run_week.py --team-id 1234567  # or put FPL_TEAM_ID=1234567 in .env
     python scripts/run_week.py --free-transfers 2 # override the estimate from your history
     python scripts/run_week.py --no-advisor       # skip the Claude news check
+    python scripts/run_week.py --advisor-effort low --max-searches 2   # a cheaper news check
     python scripts/run_week.py --backtest         # also re-check the model (~1 minute)
 
 Your team id is the number in your team's URL on the FPL site
@@ -40,6 +41,10 @@ def main() -> int:
     ap.add_argument("--free-transfers", type=int, default=None, help="override the estimate")
     ap.add_argument("--horizon", type=int, default=config.PLANNING_HORIZON_GW)
     ap.add_argument("--no-advisor", action="store_true", help="skip the Claude news check")
+    ap.add_argument("--advisor-effort", choices=["low", "medium", "high", "xhigh", "max"],
+                    default=config.ADVISOR_EFFORT, help="how hard Claude thinks (lower = cheaper)")
+    ap.add_argument("--max-searches", type=int, default=config.ADVISOR_MAX_SEARCHES,
+                    help="most web searches Claude may run ($0.01 each)")
     ap.add_argument("--backtest", action="store_true", help="also re-run the model backtest")
     ap.add_argument("--open", action="store_true", help="open the report when done")
     args = ap.parse_args()
@@ -93,8 +98,13 @@ def main() -> int:
                                 free_transfers=0, hits=0, bank_after=0.0, team=wildcard.players,
                                 xp=wildcard.xp, formation=wildcard.formation)
             text = advisor.brief(week, players, fc.deadline, from_scratch=True)
-        advice = advisor.advise(text)
-        print(f"    {advice.action_score}/100, {advice.verdict}" if advice.ok else f"    unavailable: {advice.error}")
+        advice = advisor.advise(text, effort=args.advisor_effort, max_searches=args.max_searches)
+        if advice.ok:
+            cost = f", about ${advice.cost:.2f}" if advice.cost is not None else ""
+            print(f"    {advice.action_score}/100, {advice.verdict} ({advice.searches} searches, "
+                  f"{advice.input_tokens:,} tokens in, {advice.output_tokens:,} out{cost})")
+        else:
+            print(f"    unavailable: {advice.error}")
     else:
         print("5/6 skipping the Claude news check")
 
