@@ -1,54 +1,68 @@
-# 07 — Interface: the HTML report
+# 07 — Interface: the weekly run and the HTML report
 
-**Goal:** one page you open locally that shows what the system knows: player
-types, form, value and the season link now; and later the predictions, the
-optimiser's squad, transfers and captain, and Claude's advice.
+**Goal:** one command each gameweek, and one page that shows everything: what to do
+this week, how confident to be, and the analysis behind it.
 
 ```bash
-python scripts/pull_fpl.py            # optional: refresh the live season first
-python scripts/make_report.py --open  # -> reports/fpl_report.html, opened in your browser
+python scripts/run_week.py --open
 ```
 
-**One self-contained file.** `reports/fpl_report.html` (~5 MB) has Plotly's
-JavaScript embedded, so it needs no server and no internet: double-click it, keep
-it, share it. It is generated output, so it is git-ignored; rebuild it whenever the
-data changes. (Streamlit was the original plan; a static file is simpler and
-nothing has to keep running.)
+| step | what happens |
+|---|---|
+| 1 | refresh FPL data into the season store, and check `config.py`'s rules against FPL's |
+| 2 | fit the prediction model on every filed season; expected points for the next 5 gameweeks |
+| 3 | the best squad from scratch (what a wildcard would build) |
+| 4 | **your transfer plan**, if `FPL_TEAM_ID` is set: from your squad, bank and free transfers |
+| 5 | **Claude's news check** on the plan, if `ANTHROPIC_API_KEY` is set |
+| 6 | write `reports/fpl_report.html` and print the headline in the terminal |
 
-## What's on the page
-- **Summary tiles:** gameweeks played, players, how many link to last season, new
-  arrivals, and the link check against FPL's own history.
-- **Player types**, position by position: each profiled player on the two stats
-  that best show the types (e.g. defensive contributions vs xGI for midfielders),
-  coloured by type, beside a "fingerprint" heatmap showing what sets each type apart
-  (in standard deviations from the position average).
-- **Attacking threat:** xG/90 against xA/90 for midfielders and forwards.
-- **Risers and fallers:** the same players' points per 90 last season against this
-  season, with the biggest movers labelled.
-- **Value:** the best points per £m so far.
-- **The season link:** new arrivals by club, how players were linked, and which
-  clubs went up and down.
-- **Coming next:** placeholders for Sections 3–6.
+Options: `--no-pull` (use the data already filed), `--team-id N`, `--free-transfers N`
+(FPL doesn't publish them; the estimate comes from your history), `--horizon N`,
+`--no-advisor`, `--backtest` (re-check the model, about a minute), `--open`.
+
+**Setup, once:** put your team id (the number in your team's URL:
+`fantasy.premierleague.com/entry/<id>/event/<gw>`) and your Anthropic key in `.env`:
+```
+FPL_TEAM_ID=1234567
+ANTHROPIC_API_KEY=sk-ant-...
+```
+Without them the run still works: no personal plan, and no news check.
+
+## The report (`reports/fpl_report.html`)
+One self-contained file (~5 MB, Plotly embedded): no server, no internet. It's
+generated output, git-ignored, so rebuild it each week.
+
+**This week** (top of the page):
+- **Tiles:** next deadline, the plan's gain over making no transfers, transfers and
+  hits this week, captain, and the news-check score.
+- **This week:** expected points per gameweek with the plan against no transfers, the
+  plan week by week (out / in / hits / free transfers / captain), and your team sheet.
+- **News check (Claude):** score, verdict, summary, flagged players with sources,
+  adjustments, risks (Section 6).
+- **Best squad from scratch:** the wildcard squad.
+- **Predictions:** the highest expected points next gameweek, and a table of the top
+  60 over the horizon, with FPL's injury news.
+- **Model check** (with `--backtest`): the walk-forward backtest against simple baselines.
+
+**Analysis:** player types per position, attacking threat, risers and fallers between
+seasons, value, and how this season links to last (Sections 1–2).
 
 ## How it's built (`fpl_optimiser/app/`)
-- `charts.py`: pure Plotly builders, DataFrames in and figures out. Each takes a
-  `theme`, and the page carries every chart in light *and* dark and draws whichever
-  matches the viewer's setting (with a toggle). Colours come from a validated
-  colour-blind-safe palette: at most three categorical colours per scatter, one
-  colour for single series, and a blue ↔ red diverging scale with a neutral
-  midpoint for z-scores. Marks are thin and grids are hairlines. Only a few points
-  are labelled directly; the hover tooltips carry the detail.
-- `report.py`: `build_report()` gathers the data, and `Report.write()` renders the
-  page. Every chart has a collapsible table under it, so every value is readable
-  without hovering. Player names are treated as data: escaped in tables, and kept
-  inside a JSON block they can't break out of.
-- **Adding a section** (Sections 3–6): build a `Section(id, title, intro, blocks)`,
-  where blocks are `card(r.chart("my-id", my_builder, df))` and/or `table(df, ...)`,
-  and append it to `report.sections`.
+- `charts.py`: pure Plotly builders, DataFrames in and figures out, each drawn in light
+  *and* dark from a validated colour-blind-safe palette. Scatters use at most three
+  colours; single series use one; the plan chart highlights the plan against a grey
+  "no transfers". Marks are thin, grids are hairlines, and labels are selective.
+- `report.py`: `build_report(season, week=WeekResults(...))` assembles the page.
+  `_add_week` adds this week's sections; the analysis sections follow. Every chart has
+  a table under it. Untrusted text (player names, FPL news, everything the advisor
+  returns) is escaped, and links are `http(s)` only.
+- `scripts/run_week.py`: the weekly run; `scripts/make_report.py` rebuilds only the
+  analysis part.
 
 ## Tests
-`tests/test_report.py`: charts use their theme's validated palette with at most
-three colours per scatter, and the diverging scale is centred; the page is
-self-contained (no external scripts); a chart can never collide with a section's
-id; hostile names stay escaped and can't break the embedded data; and the whole
-report builds from a filed store.
+`tests/test_report.py`: charts use their theme's palette, with at most three colours per
+scatter; the page is self-contained (no external scripts); chart ids can't collide with
+section ids; hostile names and advice stay escaped and `javascript:` links are dropped;
+this week's sections appear with a plan and news check, and degrade gracefully without
+a team or the advisor; the backtest section appears when given; and the full report
+builds from a filed store.

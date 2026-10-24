@@ -67,3 +67,73 @@ def test_build_report_from_a_filed_store(two_seasons):
     assert {"link", "next"} <= {s.id for s in r.sections}
     assert "arrivals" in r.figures
     report.render(r)                                        # renders without error
+
+
+# --------------------------------------------------------------------------- #
+# this week's sections (plan, news check, from-scratch squad, predictions)
+# --------------------------------------------------------------------------- #
+from fpl_optimiser.claude.advisor import Advice  # noqa: E402
+from fpl_optimiser.ingest.my_team import MyTeam  # noqa: E402
+from fpl_optimiser.model.predict import Forecast  # noqa: E402
+from fpl_optimiser.optimise import planner, squad  # noqa: E402
+from tests.test_optimise import _candidates  # noqa: E402
+
+HOSTILE = "<img src=x onerror=alert(1)>"
+
+
+def _week(with_team=True, advice=None, backtest=None):
+    c = _candidates().assign(code=lambda d: d["id"] + 1000, status="a", news="")
+    xp = pd.concat([c.assign(gw=g, fixtures="ABC (H)", xp_raw=c["xp"], p_play=1.0, p_60=1.0)
+                    for g in (9, 10)], ignore_index=True)
+    fc = Forecast(season="2026-27", next_gw=9, gameweeks=[9, 10], xp=xp,
+                  per_fixture=pd.DataFrame(), model=None, deadline="2026-10-31 11:00")
+    wc = squad.pick_squad(xp[xp["gw"] == 9])
+    plan = base = team = None
+    if with_team:
+        ids, bank = list(wc.players["id"]), round(100 - wc.cost, 1)
+        plan = planner.plan(xp, fc.players, ids, bank, 1)
+        base = planner.plan(xp, fc.players, ids, bank, 1, max_transfers_per_gw=0)
+        team = MyTeam(manager_id=1, gw=8, squad_ids=ids, bank=bank, free_transfers=1,
+                      sell_prices={}, purchase_prices={}, chips_used=[])
+    return report.WeekResults(fc, wc, plan, base, team, advice, backtest)
+
+
+def _render(week):
+    r = report.Report(title="T", subtitle="S")
+    report._add_week(r, week)
+    return r, report.render(r)
+
+
+def test_week_sections_with_a_plan_and_a_news_check():
+    advice = Advice(action_score=82, verdict="adjust", summary=HOSTILE, captain_note="fine",
+                    player_flags=[{"player": HOSTILE, "status": "doubt", "note": "knock",
+                                   "source": "javascript:alert(1)"},
+                                  {"player": "Ok", "status": "fit", "note": "-",
+                                   "source": "https://example.com/a"}],
+                    adjustments=["swap"], risks=[], model="m", searches=2,
+                    sources=[{"title": "A", "url": "https://example.com/a"}])
+    r, page = _render(_week(advice=advice))
+    assert [s.id for s in r.sections] == ["week", "advice", "wildcard", "predictions"]
+    labels = {label: value for label, value, _ in r.tiles}
+    assert labels["Next deadline"] == "GW9" and labels["News check"] == "82/100"
+    assert "Plan vs no transfers" in labels and {"plan", "xp-next"} <= set(r.figures)
+    rest = page.split('<script type="application/json"')[0]
+    assert HOSTILE not in rest and "&lt;img src=x" in rest              # escaped everywhere
+    assert 'href="javascript' not in page                                # unsafe link dropped
+    assert '<a href="https://example.com/a" target="_blank" rel="noopener noreferrer">' in page
+
+
+def test_week_sections_without_a_team_or_the_advisor():
+    r, page = _render(_week(with_team=False))
+    assert "FPL_TEAM_ID" in page and "Skipped this run" in page
+    assert "Best squad from scratch" in {label for label, _, _ in r.tiles}
+    failed = Advice(action_score=0, verdict="wait", summary="", error="no key")
+    assert "Advisor unavailable: no key" in _render(_week(with_team=False, advice=failed))[1]
+
+
+def test_backtest_section_when_given():
+    bt = pd.DataFrame({"method": ["Model", "Form"], "MAE": [1.3, 1.3], "RMSE": [2.2, 2.3],
+                       "rank_corr": [0.6, 0.6], "top11_points": [49.6, 38.9],
+                       "gameweeks": [7, 7], "predictions": [100, 100]})
+    r, _ = _render(_week(backtest=bt))
+    assert r.sections[-1].id == "backtest" and "backtest" in r.figures

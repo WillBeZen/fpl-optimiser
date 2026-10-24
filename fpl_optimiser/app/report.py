@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import plotly.io as pio
@@ -26,6 +27,13 @@ from fpl_optimiser.app import charts
 from fpl_optimiser.features import player_profiles
 from fpl_optimiser.features.player_profiles import LABELS
 from fpl_optimiser.ingest import player_link, season_store
+
+if TYPE_CHECKING:                     # type hints only; nothing imported at runtime
+    from fpl_optimiser.claude.advisor import Advice
+    from fpl_optimiser.ingest.my_team import MyTeam
+    from fpl_optimiser.model.predict import Forecast
+    from fpl_optimiser.optimise.planner import Plan
+    from fpl_optimiser.optimise.squad import Squad
 
 OUTPUT = config.ROOT / "reports" / "fpl_report.html"
 _esc = html.escape
@@ -84,6 +92,34 @@ def note(text: str) -> str:
     return f'<p class="note">{_esc(text)}</p>'
 
 
+def link(url, text: str) -> str:
+    """An outbound link from untrusted data: http(s) only, escaped, opened in a new
+    tab without passing a referrer. Anything else is shown as plain text."""
+    if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+        return _esc(text)
+    return f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer">{_esc(text)}</a>'
+
+
+def html_table(headers: list[str], rows: list[list[str]]) -> str:
+    """A table whose cells are already-escaped HTML (e.g. containing link())."""
+    head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+    return f'<div class="tbl-wrap"><table class="tbl"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+
+
+def team_sheet(team: pd.DataFrame, fixtures: pd.Series | None = None) -> pd.DataFrame:
+    """The 15 as a table (XI then bench), captain (C) and vice (V) marked."""
+    mark = team["captain"].map({True: " (C)"}).fillna("") + team["vice"].map({True: " (V)"}).fillna("")
+    out = pd.DataFrame({"": team["role"].map({"XI": "XI", "bench": "Bench"}),
+                        "Pos": team["position"], "Player": team["web_name"] + mark,
+                        "Club": team["team_name"]})
+    if fixtures is not None:
+        out["Fixture"] = team["id"].map(fixtures).fillna("-")
+    out["Price £m"] = team["price"]
+    out["Expected pts"] = team["xp"].round(2)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Data -> report
 # --------------------------------------------------------------------------- #
@@ -104,7 +140,134 @@ def _season_change(prev_players: pd.DataFrame, curr_players: pd.DataFrame,
     return m.assign(delta=m["pts_90_curr"] - m["pts_90_prev"]).reset_index(drop=True)
 
 
-def build_report(season: str | None = None) -> Report:
+@dataclass
+class WeekResults:
+    """What the weekly run produced (scripts/run_week.py); every part but the
+    forecast and the from-scratch squad is optional."""
+    forecast: Forecast
+    wildcard: Squad                    # the best squad from scratch (a wildcard)
+    plan: Plan | None = None           # your transfer plan
+    baseline: Plan | None = None       # your squad with no transfers
+    team: MyTeam | None = None
+    advice: Advice | None = None       # None = skipped
+    backtest: pd.DataFrame | None = None   # model.backtest.summarise(...)
+
+
+def _add_week(r: Report, w: WeekResults) -> None:
+    """Tiles and sections for this week's decisions, ahead of the analysis."""
+    fc = w.forecast
+    gw, last = fc.next_gw, fc.gameweeks[-1]
+    next_fixtures = fc.xp[fc.xp["gw"] == gw].set_index("id")["fixtures"]
+    when = (f"{datetime.strptime(fc.deadline, '%Y-%m-%d %H:%M'):%a %d %b, %H:%M} UTC"
+            if fc.deadline else "")
+    tiles = [("Next deadline", f"GW{gw}", when)]
+
+    sec = Section("week", "This week")
+    if w.plan is not None and w.baseline is not None:
+        first = w.plan.weeks[0]
+        gain = w.plan.net - w.baseline.xp
+        tiles += [("Plan vs no transfers", f"{gain:+.1f} pts", f"GW{gw}-{last}, after hits"),
+                  ("Transfers this week", str(len(first.bought)),
+                   f"{first.hits} hit(s), {first.free_transfers} free available"),
+                  ("Captain", first.captain, f"team expects {first.xp:.1f} pts in GW{gw}")]
+        t = w.team
+        sec.intro = (f"From your squad (GW{t.gw} picks), £{t.bank:.1f}m in the bank and "
+                     f"{t.free_transfers} free transfer(s) (estimated from your history; override "
+                     f"with --free-transfers), the planner looked {len(fc.gameweeks)} gameweeks "
+                     f"ahead. A -4 hit is only taken if it gains more than "
+                     f"{config.HIT_THRESHOLD_POINTS:g} expected points. {t.note}").strip()
+        rows = []
+        for pw, bw in zip(w.plan.weeks, w.baseline.weeks):
+            rows.append({"GW": pw.gw,
+                         "Out": ", ".join(pw.sold["web_name"]) or "-",
+                         "In": ", ".join(pw.bought["web_name"]) or "-",
+                         "Hits": pw.hits, "Free transfers": pw.free_transfers,
+                         "Captain": pw.captain, "Expected pts": round(pw.xp, 1),
+                         "No transfers": round(bw.xp, 1)})
+        sec.blocks += [
+            card(r.chart("plan", charts.plan_vs_baseline, [x.gw for x in w.plan.weeks],
+                         [x.xp for x in w.plan.weeks], [x.xp for x in w.baseline.weeks])),
+            table(pd.DataFrame(rows), "Table: the plan week by week", open_=True),
+            table(team_sheet(first.team, next_fixtures), f"Table: your GW{gw} team sheet", open_=True)]
+    else:
+        tiles.append(("Best squad from scratch", f"{w.wildcard.xp:.1f} pts",
+                      f"GW{gw}, captain {w.wildcard.captain}"))
+        sec.blocks.append(note("Add FPL_TEAM_ID=<your team id> to .env (the number in your "
+                               "team's URL on the FPL site) to get a transfer plan for your own squad."))
+    r.sections.append(sec)
+
+    # --- the Claude news check --------------------------------------------------
+    adv = Section("advice", "News check (Claude)")
+    a = w.advice
+    if a is None:
+        adv.blocks.append(note("Skipped this run (--no-advisor)."))
+    elif not a.ok:
+        adv.blocks.append(note(f"Advisor unavailable: {a.error}"))
+    else:
+        tiles.append(("News check", f"{a.action_score}/100", f"Claude says: {a.verdict}"))
+        adv.intro = (f"{a.model} read the latest news for the players involved "
+                     f"({a.searches} web searches) and scored how strongly to act on this "
+                     "week's moves. News adjusts, never overrides, the maths.")
+        verdict = (f'<div class="verdict"><div class="value">{a.action_score}<span>/100</span></div>'
+                   f'<div><p class="big">{_esc(a.verdict.capitalize())}</p><p>{_esc(a.summary)}</p>'
+                   f'<p class="note">Captain: {_esc(a.captain_note)}</p></div></div>')
+        flags = html_table(["Player", "Status", "Note", "Source"],
+                           [[_esc(f["player"]), _esc(f["status"]), _esc(f["note"]),
+                             link(f["source"], "source") if f["source"] else "-"] for f in a.player_flags])
+        lists = "".join(f"<h3>{_esc(title)}</h3><ul>" + "".join(f"<li>{_esc(x)}</li>" for x in items) + "</ul>"
+                        for title, items in (("Suggested adjustments", a.adjustments), ("Risks", a.risks))
+                        if items)
+        seen, srcs = set(), []
+        for s in a.sources:
+            if s["url"] not in seen:
+                seen.add(s["url"])
+                srcs.append(f"<li>{link(s['url'], s['title'] or s['url'])}</li>")
+        sources = f"<details><summary>Sources searched ({len(srcs)})</summary><ul>{''.join(srcs[:15])}</ul></details>"
+        adv.blocks.append(card(verdict + flags + lists + sources))
+    r.sections.append(adv)
+
+    # --- the best squad from scratch ----------------------------------------------
+    s = w.wildcard
+    r.sections.append(Section(
+        "wildcard", "Best squad from scratch",
+        f"If you could rebuild your squad for free (a wildcard), this is the best one for GW{gw} "
+        f"on expected points: {s.formation}, £{s.cost:.1f}m, {s.xp:.1f} expected points with "
+        f"{s.captain} as captain.",
+        [table(team_sheet(s.players, next_fixtures), f"Table: the GW{gw} squad", open_=True)]))
+
+    # --- predictions ------------------------------------------------------------------
+    nxt = fc.xp[fc.xp["gw"] == gw].nlargest(15, "xp")
+    labels = [f"{n} · {c} {p} ({f})" for n, c, p, f in
+              zip(nxt["web_name"], nxt["team_name"], nxt["position"], nxt["fixtures"])]
+    wide = fc.wide().head(60)
+    gw_cols = [c for c in wide.columns if c.startswith("GW")]
+    preds = wide[["web_name", "team_name", "position", "price", *gw_cols, "total", "status", "news"]].rename(
+        columns={"web_name": "Player", "team_name": "Club", "position": "Pos", "price": "Price £m",
+                 "total": "Total", "status": "Status", "news": "FPL news"})
+    preds[gw_cols + ["Total"]] = preds[gw_cols + ["Total"]].round(2)
+    r.sections.append(Section(
+        "predictions", "Predictions",
+        f"Expected points per player for GW{gw}-{last}, after FPL's injury and suspension flags. "
+        "How the model is built and how well it has done: Model check, below.",
+        [card(r.chart("xp-next", charts.top_bars, labels, list(nxt["xp"]),
+                      f"Highest expected points, GW{gw}", "Expected points")),
+         table(preds.fillna({"FPL news": ""}), f"Table: top 60 over GW{gw}-{last}")]))
+
+    if w.backtest is not None:
+        bt = w.backtest
+        r.sections.append(Section(
+            "backtest", "Model check",
+            f"Walk-forward backtest over {int(bt['gameweeks'].iloc[0])} gameweeks of this season: "
+            "each gameweek predicted using only what was known before it, then compared with what "
+            "happened. Top-11 = the real points of the 11 players each method rated highest.",
+            [card(r.chart("backtest", charts.top_bars, list(bt["method"]), list(bt["top11_points"]),
+                          "Real points of each method's top 11, per gameweek", "Points")),
+             table(bt.round(3), "Table: all scores", open_=True)]))
+
+    r.tiles[:0] = tiles
+
+
+def build_report(season: str | None = None, week: WeekResults | None = None) -> Report:
     seasons = season_store.available()
     if not seasons:
         raise FileNotFoundError("nothing filed yet: run scripts/pull_fpl.py first")
@@ -123,8 +286,11 @@ def build_report(season: str | None = None) -> Report:
     gw = cur.finished_gameweeks
     nice = lambda s: s.replace("-", "/")                       # noqa: E731
     r = Report(title=f"FPL optimiser · {nice(season)}",
-               subtitle=f"After gameweek {gw} · player types, form and value"
+               subtitle=(f"Gameweek {week.forecast.next_gw} plan · " if week else "")
+                        + f"after gameweek {gw}: predictions, player types, form and value"
                         + (f" · linked to {nice(prev_season)}" if prev else ""))
+    if week is not None:
+        _add_week(r, week)
 
     # --- overview tiles ------------------------------------------------------
     r.tiles.append(("Gameweeks played", str(gw), nice(season)))
@@ -276,6 +442,15 @@ table.tbl { border-collapse:collapse; width:100%; font-size:13px; font-variant-n
 .tbl th, .tbl td { padding:6px 10px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
 .tbl th { color:var(--ink2); font-weight:600; }
 p.note { color:var(--ink2); font-size:13px; margin:8px 10px; }
+a { color:var(--accent); }
+.verdict { display:flex; flex-wrap:wrap; gap:8px 24px; align-items:flex-start; padding:10px 10px 4px; }
+.verdict .value { font-size:48px; font-weight:600; line-height:1; }
+.verdict .value span { font-size:18px; font-weight:400; color:var(--muted); }
+.verdict > div:last-child { flex:1 1 320px; min-width:0; }
+.verdict p { margin:0 0 6px; }
+p.big { font-size:18px; font-weight:600; }
+.card h3 { font-size:15px; font-weight:600; margin:16px 10px 4px; }
+.card ul { margin:4px 0 8px; padding-left:28px; }
 footer { color:var(--muted); font-size:12px; margin-top:48px; }
 """
 

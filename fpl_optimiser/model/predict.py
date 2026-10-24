@@ -37,6 +37,13 @@ class Forecast:
     xp: pd.DataFrame            # one row per (player, gameweek)
     per_fixture: pd.DataFrame   # one row per (player, fixture), with the model's parts
     model: points.PointsModel
+    deadline: str = ""          # the next gameweek's deadline, "YYYY-MM-DD HH:MM" UTC
+
+    @property
+    def players(self) -> pd.DataFrame:
+        """One row per current player: id, code, name, club, position, price, status, news."""
+        cols = ["id", "code", "web_name", "team_name", "position", "price", "status", "news"]
+        return self.xp.drop_duplicates("id")[cols].reset_index(drop=True)
 
     def wide(self) -> pd.DataFrame:
         """One row per player: xp in each gameweek (GW9, GW10, ...) and their total."""
@@ -111,4 +118,7 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
                                           "p_60": 0.0, "fixtures": "-"}).reset_index()
     info = cur.players[["id", "code", "web_name", "team_name", "position", "price", "status", "news"]]
     xp = info.merge(per_gw.rename(columns={"round": "gw"}), on="id")
-    return Forecast(season=season, next_gw=nxt, gameweeks=gws, xp=xp, per_fixture=fx, model=model)
+    when = cur.gameweeks.loc[cur.gameweeks["id"] == nxt, "deadline_time"]
+    deadline = f"{when.iloc[0]:%Y-%m-%d %H:%M}" if len(when) and pd.notna(when.iloc[0]) else ""
+    return Forecast(season=season, next_gw=nxt, gameweeks=gws, xp=xp, per_fixture=fx,
+                    model=model, deadline=deadline)

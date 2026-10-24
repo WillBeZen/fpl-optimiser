@@ -231,3 +231,43 @@ def count_bars(counts: pd.Series, title: str, x_title: str, theme: str = "light"
     layout["bargap"] = 0.35
     fig.update_layout(**layout)
     return fig
+
+
+def top_bars(labels: list[str], values: list[float], title: str, x_title: str,
+             theme: str = "light", fmt: str = "{:.1f}") -> go.Figure:
+    """A ranked horizontal bar chart (single series), first item at the top."""
+    t = THEMES[theme]
+    labels, values = list(labels)[::-1], list(values)[::-1]
+    fig = go.Figure(go.Bar(
+        x=values, y=labels, orientation="h", marker=dict(color=t["series"][0], cornerradius=4),
+        text=[fmt.format(v) for v in values], textposition="outside",
+        textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+        hovertemplate="<b>%{y}</b>: %{x:.2f}<extra></extra>"))
+    layout = _layout(t, title, x_title, height=150 + 28 * len(values))
+    layout["yaxis"].update(showgrid=False, tickfont=dict(color=t["ink2"], size=12), automargin=True)
+    layout["margin"].update(r=48)
+    layout["bargap"] = 0.35
+    fig.update_layout(**layout)
+    return fig
+
+
+def plan_vs_baseline(gws: list[int], plan_xp: list[float], base_xp: list[float],
+                     theme: str = "light") -> go.Figure:
+    """Expected points per gameweek with the transfer plan vs making no transfers.
+    The plan is the point (accent colour, labelled); the baseline is context (grey)."""
+    t = THEMES[theme]
+    x = [f"GW{g}" for g in gws]
+    fig = go.Figure([
+        go.Bar(x=x, y=base_xp, name="No transfers", marker=dict(color=t["muted"], cornerradius=4),
+               hovertemplate="%{x}, no transfers: %{y:.1f} pts<extra></extra>"),
+        go.Bar(x=x, y=plan_xp, name="With the plan", marker=dict(color=t["series"][0], cornerradius=4),
+               text=[f"{v:.1f}" for v in plan_xp], textposition="outside",
+               textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+               hovertemplate="%{x}, with the plan: %{y:.1f} pts<extra></extra>"),
+    ])
+    layout = _layout(t, "Expected points per gameweek (XI + captain, before hits)",
+                     "", "Expected points", height=380, legend_rows=2)
+    layout["xaxis"].update(showgrid=False)
+    layout.update(barmode="group", bargap=0.35, bargroupgap=0.12)
+    fig.update_layout(**layout)
+    return fig
