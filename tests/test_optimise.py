@@ -75,6 +75,7 @@ def test_impossible_budget_is_reported():
 # --------------------------------------------------------------------------- #
 # multi-week planner (Section 5)
 # --------------------------------------------------------------------------- #
+from fpl_optimiser.ingest import my_team  # noqa: E402
 from fpl_optimiser.optimise import planner  # noqa: E402
 
 
@@ -89,10 +90,10 @@ def _my_team(c: pd.DataFrame):
 
 
 def test_selling_price_keeps_half_the_profit():
-    assert planner.selling_price(7.0, 7.3) == 7.1      # +0.3 -> keep 0.1 (rounded down)
-    assert planner.selling_price(7.0, 7.4) == 7.2
-    assert planner.selling_price(5.5, 5.6) == 5.5      # +0.1 -> keep nothing
-    assert planner.selling_price(7.0, 6.8) == 6.8      # a fall is taken in full
+    assert my_team.selling_price(7.0, 7.3) == 7.1      # +0.3 -> keep 0.1 (rounded down)
+    assert my_team.selling_price(7.0, 7.4) == 7.2
+    assert my_team.selling_price(5.5, 5.6) == 5.5      # +0.1 -> keep nothing
+    assert my_team.selling_price(7.0, 6.8) == 6.8      # a fall is taken in full
 
 
 def test_no_transfers_keeps_the_squad_every_week():

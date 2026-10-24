@@ -7,8 +7,8 @@ a transfer now buys two next week, or that a -4 hit pays off over five weeks.
 
 Each gameweek t has the single-gameweek squad rules (optimise/squad.py), plus:
   squad[t] = squad[t-1] + bought[t] - sold[t]     (squad[0] = your squad today)
-  bank[t]  = bank[t-1] + sales - purchases >= 0   (FPL selling prices: you keep
-                                                   half of any profit, rounded down)
+  bank[t]  = bank[t-1] + sales - purchases >= 0   (your players sell at the prices
+                                                   passed in: ingest/my_team.py)
   free transfers: hits[t] >= transfers[t] - free[t];
                   free[t+1] <= free[t] - transfers[t] + hits[t] + 1, and <= the cap
 
@@ -57,12 +57,6 @@ class Plan:
     @property
     def net(self) -> float:
         return self.xp - self.hit_cost
-
-
-def selling_price(purchase: float, now: float) -> float:
-    """FPL's rule: keep half of any rise (rounded down to £0.1m); take any fall in full."""
-    p, n = round(purchase * 10), round(now * 10)
-    return (p + (n - p) // 2) / 10 if n > p else n / 10
 
 
 def plan(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: float,

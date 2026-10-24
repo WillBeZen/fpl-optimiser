@@ -18,7 +18,7 @@ The single-gameweek rules (Section 4) apply to every gameweek in the horizon
 - **squad continuity:** this week's squad = last week's + bought − sold;
 - **money:** bank = last week's bank + sales − purchases, never below zero. Your own
   players sell at **FPL's selling price**: you keep half of any rise, rounded down to
-  £0.1m, and take any fall in full (`planner.selling_price`);
+  £0.1m, and take any fall in full (`my_team.selling_price`);
 - **free transfers:** paid transfers ≥ transfers − free ones; next week's free
   transfers ≤ this week's − used + 1, capped at 5 (`config.MAX_BANKED_TRANSFERS`).
 
@@ -41,8 +41,8 @@ week, no transfers), which is what a plan's gain is measured against.
 
 ## What isn't planned yet
 Chips (wildcard, free hit, bench boost, triple captain). Prices are assumed not to
-change during the horizon. Your free transfers and selling prices come from FPL's public
-data (Section 6 wiring, `ingest/my_team.py`); you can override them.
+change during the horizon. Your squad, free transfers and selling prices come from FPL's public
+data (`ingest/my_team.py`); `run_week.py --free-transfers N` overrides the estimate.
 
 ## Tests
 `tests/test_optimise.py`: selling prices follow FPL's rule; with transfers disabled the
