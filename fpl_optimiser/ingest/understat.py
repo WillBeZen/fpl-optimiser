@@ -1,4 +1,4 @@
-"""Advanced team stats from Understat — the primary advanced-stats source.
+"""Advanced team stats from Understat — an OPTIONAL backend (adds PPDA).
 
 Why Understat (and not FBref): FBref now sits behind Cloudflare, so `soccerdata`
 drives a headless Chrome browser to read it — heavy, fragile, and it needs Google

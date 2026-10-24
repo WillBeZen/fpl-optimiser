@@ -4,9 +4,9 @@ sources. Run from the repo root after installing requirements:
 
     python scripts/verify_setup.py
 
-Checks: config, the FPL API (xG + CBIT fields), Understat (the primary advanced
-source — browserless), and FPL<->Understat team-name matching. FBref is probed
-last and is optional (it needs Google Chrome); a skip there is fine.
+Checks config, the FPL API (xG + CBIT fields), the opponent-stats adapter (which
+picks a working advanced source — FBref by default, Understat as fallback), and
+FPL<->source team-name matching.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def main() -> int:
         print(f"{NO} config failed — fix this first")
         return 1
 
-    from fpl_optimiser.ingest import fpl_api, understat, fbref, team_map
+    from fpl_optimiser.ingest import fpl_api, opponent_stats, team_map
 
     # 2 — FPL players
     step("2. FPL players")
@@ -74,46 +74,39 @@ def main() -> int:
         traceback.print_exc()
         print(f"{NO} FPL fixtures failed")
 
-    # 4 — Understat (primary advanced source)
-    step("4. Understat advanced team stats (browserless)")
-    us_team_names: list[str] = []
+    # 4 — opponent stats via the adapter (auto-selects a working source)
+    step("4. opponent stats (advanced; auto-selects source)")
+    opp_team_names: list[str] = []
     try:
-        tm = understat.team_matches(config.SEASON_TRAIN)
-        print(f"{OK} team-match rows: {len(tm)} | columns: {list(tm.columns)}")
-        ts = understat.team_season(config.SEASON_TRAIN)
-        print(f"   season aggregates: {len(ts)} teams")
-        print("   leakiest 3 by mean xGA:")
-        print(ts.sort_values("xga_mean", ascending=False)
-                .head(3)[["team", "matches", "xga_mean", "ppda_mean",
-                          "deep_allowed_mean", "goals_conceded"]].to_string(index=False))
-        us_team_names = sorted(tm["team"].dropna().unique())
-        print(f"   {len(us_team_names)} teams")
+        opp = opponent_stats.opponent_stats(config.SEASON_TRAIN)
+        src = opp.attrs.get("source", "?")
+        print(f"{OK} via '{src}' | {len(opp)} teams | columns: {list(opp.columns)}")
+        have_xga = "xga_per_game" in opp.columns and opp["xga_per_game"].notna().any()
+        sort_col = "xga_per_game" if have_xga else "goals_conceded_per_game"
+        label = "xGA/game" if have_xga else "goals conceded/game"
+        cols = [c for c in ["team", "matches", "xga_per_game",
+                            "goals_conceded_per_game", "ppda_mean"] if c in opp.columns]
+        print(f"   leakiest 3 by {label}:")
+        print(opp.sort_values(sort_col, ascending=False).head(3)[cols].to_string(index=False))
+        opp_team_names = sorted(opp["team"].dropna().unique())
+        print(f"   {len(opp_team_names)} teams")
     except Exception:
         failures += 1
         traceback.print_exc()
-        print(f"{NO} Understat failed")
+        print(f"{NO} opponent stats failed — paste the column list above if it's a KeyError")
 
-    # 5 — reconciliation FPL <-> Understat
-    step("5. team-name reconciliation FPL <-> Understat")
-    if fpl_team_names and us_team_names:
-        rec = team_map.reconcile(fpl_team_names, us_team_names)
+    # 5 — reconciliation FPL <-> opponent source
+    step("5. team-name reconciliation FPL <-> opponent source")
+    if fpl_team_names and opp_team_names:
+        rec = team_map.reconcile(fpl_team_names, opp_team_names)
         print(f"{OK} matched {len(rec['matched'])}/{len(fpl_team_names)}")
-        print("   unmatched (FPL):      ", rec["fpl_only"])
-        print("   unmatched (Understat):", rec["fbref_only"])
+        print("   unmatched (FPL):   ", rec["fpl_only"])
+        print("   unmatched (source):", rec["fbref_only"])
         if rec["fpl_only"] or rec["fbref_only"]:
             failures += 1
             print("   -> add aliases in fpl_optimiser/ingest/team_map.py for these")
     else:
         print("   (skipped — needed both team lists from steps 2 and 4)")
-
-    # 6 — FBref (optional)
-    step("6. FBref (optional — needs Google Chrome)")
-    try:
-        sched = fbref.schedule(config.SEASON_TRAIN)
-        print(f"{OK} FBref reachable: schedule rows {len(sched)}")
-    except Exception as e:
-        first = str(e).splitlines()[0] if str(e) else type(e).__name__
-        print(f"   - skipped (this is fine; Understat is primary): {first}")
 
     step("summary")
     if failures == 0:

@@ -136,3 +136,53 @@ def test_team_reconcile_understat_names():
     assert rec["matched"]["Wolves"] == "Wolverhampton Wanderers"
     assert rec["matched"]["Spurs"] == "Tottenham"
     assert rec["fpl_only"] == [] and rec["fbref_only"] == []
+
+
+# --------------------------------------------------------------------------- #
+# opponent_stats adapter
+# --------------------------------------------------------------------------- #
+import config  # noqa: E402
+from fpl_optimiser.ingest import opponent_stats  # noqa: E402
+
+
+def test_parse_score_handles_dashes():
+    assert opponent_stats._parse_score("2-1") == (2, 1)
+    assert opponent_stats._parse_score("3\u20130") == (3, 0)   # en dash
+    assert opponent_stats._parse_score(None) == (None, None)
+    assert opponent_stats._parse_score("postponed") == (None, None)
+
+
+def test_opponent_stats_fbref_from_schedule(monkeypatch):
+    from fpl_optimiser.ingest import fbref
+    mock = pd.DataFrame({
+        "home_team": ["Arsenal", "Burnley"],
+        "away_team": ["Burnley", "Arsenal"],
+        "home_xg": [2.0, 0.5],
+        "away_xg": [0.4, 1.8],
+        "score": ["3-0", "1-2"],
+    })
+    monkeypatch.setattr(fbref, "schedule", lambda season=config.SEASON_TRAIN: mock)
+    df = opponent_stats.opponent_stats(source="fbref").set_index("team")
+    assert df.loc["Arsenal", "matches"] == 2
+    assert abs(df.loc["Arsenal", "xga_per_game"] - 0.45) < 1e-9   # (0.4 + 0.5)/2
+    assert abs(df.loc["Burnley", "xga_per_game"] - 1.9) < 1e-9    # (1.8 + 2.0)/2
+    assert abs(df.loc["Arsenal", "goals_conceded_per_game"] - 0.5) < 1e-9  # (0 + 1)/2
+    assert df.attrs["source"] == "fbref"
+
+
+def test_opponent_stats_fbref_schedule_without_xg(monkeypatch):
+    """Real FBref schedule (this soccerdata version) has score but no xG columns."""
+    import math
+    from fpl_optimiser.ingest import fbref
+    mock = pd.DataFrame({
+        "league": ["ENG-Premier League"] * 2, "season": ["2526"] * 2,
+        "week": [1, 1], "date": ["2025-08-16", "2025-08-16"],
+        "home_team": ["Arsenal", "Burnley"], "score": ["3-0", "1-2"],
+        "away_team": ["Burnley", "Arsenal"], "game_id": ["i1", "i2"],
+    })
+    monkeypatch.setattr(fbref, "schedule", lambda season=config.SEASON_TRAIN: mock)
+    df = opponent_stats.opponent_stats(source="fbref").set_index("team")
+    assert df.loc["Arsenal", "matches"] == 2
+    assert abs(df.loc["Arsenal", "goals_conceded_per_game"] - 0.5) < 1e-9   # (0 + 1)/2
+    assert abs(df.loc["Burnley", "goals_conceded_per_game"] - 2.5) < 1e-9   # (2 + 3)/2
+    assert math.isnan(df.loc["Arsenal", "xga_per_game"])                    # no xG in schedule

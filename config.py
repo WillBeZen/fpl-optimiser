@@ -112,11 +112,11 @@ ARCHETYPE_K = 3
 # are treated as bench fodder (not picked to start).
 MIN_START_PROB = 0.6
 
-# Advanced opponent stats source. "understat" is browserless (xGA, PPDA, deep
-# completions) and is the primary source. "fbref" is optional and needs Google
-# Chrome installed — soccerdata drives a headless browser because FBref is behind
-# Cloudflare.
-ADVANCED_STATS_SOURCE = "understat"
+# Advanced opponent stats source for the opponent_stats adapter. "fbref" works via
+# soccerdata + Google Chrome (the proven path). "understat" is lighter and adds a
+# pressing metric (PPDA) but now sits behind Cloudflare and may block plain HTTP;
+# the adapter falls back automatically if the chosen source errors.
+ADVANCED_STATS_SOURCE = "fbref"
 
 # --------------------------------------------------------------------------- #
 # Paths

@@ -57,10 +57,23 @@ def _series(df: pd.DataFrame, col: str, default=pd.NA) -> pd.Series:
 # --------------------------------------------------------------------------- #
 # HTTP layer (network) — thin, cached
 # --------------------------------------------------------------------------- #
+_session = None
+
+
+def _http():
+    """One shared requests.Session, so the ~800 back-to-back element-summary calls
+    in a full build reuse a single keep-alive connection instead of paying for a
+    fresh TLS handshake each time."""
+    global _session
+    if _session is None:
+        import requests  # lazy: module still imports if requests isn't installed
+        _session = requests.Session()
+        _session.headers.update(_HEADERS)
+    return _session
+
+
 def _cached_get(path: str, ttl_hours: float = _DEFAULT_TTL_H) -> Any:
     """GET {FPL_API_BASE}/{path}/ with a small on-disk JSON cache."""
-    import requests  # lazy: module still imports if requests isn't installed
-
     _CACHE.mkdir(parents=True, exist_ok=True)
     key = path.strip("/").replace("/", "_") or "root"
     cache_file = _CACHE / f"{key}.json"
@@ -70,7 +83,7 @@ def _cached_get(path: str, ttl_hours: float = _DEFAULT_TTL_H) -> Any:
         return json.loads(cache_file.read_text())
 
     url = f"{config.FPL_API_BASE}/{path.strip('/')}/"
-    resp = requests.get(url, headers=_HEADERS, timeout=20)
+    resp = _http().get(url, timeout=20)
     resp.raise_for_status()
     data = resp.json()
     cache_file.write_text(json.dumps(data))
