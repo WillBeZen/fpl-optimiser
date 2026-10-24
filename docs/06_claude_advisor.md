@@ -20,7 +20,7 @@ python scripts/run_week.py --open      # the news check runs as step 5
 in, free transfers and hits, the expected-points gain over making no transfers, the
 captain and vice, and every squad player with **FPL's own status flag and news text**.
 
-`advise()` makes **one request** to `config.ADVISOR_MODEL` (Claude Opus 5.5) with:
+`advise()` makes **one request** to `config.ADVISOR_MODEL` (Claude Sonnet 5.5) with:
 - **adaptive thinking** at `config.ADVISOR_EFFORT` (`high`);
 - **Anthropic's web search tool** (`web_search_20260209`, up to `ADVISOR_MAX_SEARCHES`
   searches). Claude decides what to look up;

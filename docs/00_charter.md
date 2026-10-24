@@ -89,7 +89,7 @@ human-readable explanation and for Claude's narrative.
   real squad (public FPL data: picks, bank, estimated free transfers, FPL selling
   prices); bank vs spend vs −4 hit only when the gain clears the threshold.
   *Not yet:* chip timing.
-- [x] **6 — Claude advisor.** Claude Opus 5.5 + web search → a strict structured
+- [x] **6 — Claude advisor.** Claude Sonnet 5.5 + web search → a strict structured
   answer: 0–100 action score, verdict, flagged players with sources; news adjusts,
   never overrides, the maths. Refusal fallback on; never crashes the run.
 - [x] **7 — Interface.** `scripts/run_week.py` (one command a week) → one

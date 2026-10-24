@@ -163,7 +163,7 @@ reports/                      generated HTML (git-ignored)
   constant. Below 160 rows the models fall back to plain averages.
 - **PuLP 4 drops the bundled CBC solver**; requirements pin `pulp<4`, and
   `squad.solve()` silences the deprecation notice.
-- **Claude Opus 5.5 rejects forced `tool_choice`** (`any`/`tool`): the advisor uses
+- **Claude Sonnet 5.5 rejects forced `tool_choice`** (`any`/`tool`): the advisor uses
   `auto` + a strict `submit_advice` tool + one nudge. Web search can end a turn with
   `pause_turn`; resend `[user, assistant(content)]` to resume.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your

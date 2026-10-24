@@ -130,7 +130,7 @@ BENCH_WEIGHT = 0.1
 # Claude advisor (Section 6). Reads the week's plan against live football news
 # (Anthropic's web search tool) and scores 0-100 how strongly to act on it.
 # Needs ANTHROPIC_API_KEY in .env; one request per run with a few searches.
-ADVISOR_MODEL = "claude-opus-5-5"
+ADVISOR_MODEL = "claude-sonnet-5-5"
 ADVISOR_EFFORT = "high"          # low | medium | high | xhigh | max
 ADVISOR_MAX_SEARCHES = 6
 
