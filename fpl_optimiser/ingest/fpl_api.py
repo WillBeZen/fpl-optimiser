@@ -42,12 +42,20 @@ _PLAYER_STAT_COLS = [
     # market / availability (news: FPL's injury/suspension note, e.g. "Knee - 75%"):
     "selected_by_percent", "form", "now_cost",
     "chance_of_playing_next_round", "status", "news",
+    # scouting: set-piece duties (1 = first choice), this gameweek's transfers, price
+    # moves (tenths of £m), FPL's own expected points, and its price-change pressure
+    "penalties_order", "corners_and_indirect_freekicks_order", "direct_freekicks_order",
+    "transfers_in_event", "transfers_out_event", "cost_change_event", "cost_change_start",
+    "ep_next", "price_change_percent",
 ]
 
 _NUMERIC_COLS = [
     "selected_by_percent", "form", "ict_index", "influence", "creativity",
     "threat", "expected_goals", "expected_assists",
     "expected_goal_involvements", "expected_goals_conceded",
+    "penalties_order", "corners_and_indirect_freekicks_order", "direct_freekicks_order",
+    "transfers_in_event", "transfers_out_event", "cost_change_event", "cost_change_start",
+    "ep_next", "price_change_percent",
 ]
 
 

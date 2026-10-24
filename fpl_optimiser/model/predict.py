@@ -20,6 +20,7 @@ what the optimiser (Sections 4-5) consumes.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -75,13 +76,33 @@ def next_gameweek(gameweeks: pd.DataFrame) -> int | None:
     return int(open_.min()) if len(open_) else None
 
 
-def availability(players: pd.DataFrame, gw: int, next_gw: int) -> pd.Series:
+_BACK = re.compile(r"(?:expected back|suspended until)\s+(\d{1,2})\s+([a-z]{3})", re.IGNORECASE)
+
+
+def return_date(news, after: pd.Timestamp) -> pd.Timestamp | None:
+    """The date in "Expected back 8 Nov" / "Suspended until 31 Oct" (None if there's
+    none), in the year that puts it on or after `after` (minus a few weeks' grace)."""
+    m = _BACK.search(news) if isinstance(news, str) else None
+    if not m:
+        return None
+    after = pd.Timestamp(after).tz_localize(None) if pd.Timestamp(after).tzinfo else pd.Timestamp(after)
+    try:
+        d = pd.Timestamp(f"{m.group(1)} {m.group(2)} {after.year}")
+    except ValueError:
+        return None
+    return d if d >= after - pd.Timedelta(days=60) else d + pd.DateOffset(years=1)
+
+
+def availability(players: pd.DataFrame, gw: int, next_gw: int,
+                 deadlines: dict[int, pd.Timestamp] | None = None) -> pd.Series:
     """Multiplier on each player's chance of playing in `gw` (index = player id).
 
     Next gameweek: FPL's chance_of_playing_next_round (75 -> 0.75; blank = fit),
-    0 for injured / suspended players FPL gives no chance for. Later gameweeks: FPL
-    publishes nothing, so players are assumed back (the Claude advisor reads the
-    news for longer absences). Left the club / not in the squad: 0 throughout.
+    0 for injured / suspended players FPL gives no chance for. Later gameweeks (with
+    `deadlines`, gameweek -> deadline): out until the date in his news ("Expected
+    back 8 Nov"); injured with "Unknown return date", back gradually at
+    config.UNKNOWN_RETURN_RAMP; everyone else assumed fit. Left the club / not in
+    the squad: 0 throughout.
     """
     status = players["status"].astype("string").fillna("a")
     chance = pd.to_numeric(players["chance_of_playing_next_round"], errors="coerce")
@@ -89,6 +110,19 @@ def availability(players: pd.DataFrame, gw: int, next_gw: int) -> pd.Series:
         m = (chance / 100).where(chance.notna(), np.where(status.isin(OUT_NEXT_GW), 0.0, 1.0))
     else:
         m = pd.Series(1.0, index=players.index)
+        if deadlines and gw in deadlines and next_gw in deadlines:
+            news = players["news"] if "news" in players else pd.Series("", index=players.index)
+            when = pd.Timestamp(deadlines[gw])
+            when = when.tz_localize(None) if when.tzinfo else when
+            ramp = config.UNKNOWN_RETURN_RAMP
+            k = gw - next_gw                                    # gameweeks after the next one
+            for i, text in news.items():
+                back = return_date(text, pd.Timestamp(deadlines[next_gw]))
+                if back is not None:
+                    m[i] = 1.0 if when.normalize() >= back else 0.0
+                elif (status[i] in OUT_NEXT_GW and isinstance(text, str)
+                      and "unknown return" in text.lower()):
+                    m[i] = ramp[k - 1] if k - 1 < len(ramp) else 1.0
     m = m.where(~status.isin(OUT_FOR_GOOD), 0.0)
     return pd.Series(m.to_numpy(dtype=float), index=players["id"].to_numpy())
 
@@ -107,6 +141,7 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
         raise ValueError(f"{season} is over: there are no gameweeks left to predict")
     gws = [g for g in range(nxt, nxt + horizon) if g <= int(cur.gameweeks["id"].max())]
 
+    deadlines = dict(zip(cur.gameweeks["id"].astype(int), cur.gameweeks["deadline_time"]))
     rows = build.build_prediction_table(cur.history, cur.fixtures, cur.players, profiles,
                                         as_of_round=nxt, gameweeks=gws, prior=prior)
     fx = rows.join(model.predict(rows))
@@ -114,7 +149,7 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
     unflagged = fx[["p_play", "p_60"]].copy()          # minutes before FPL's injury flags
     for gw in gws:
         on = fx["round"] == gw
-        mult = fx.loc[on, "id"].map(availability(cur.players, gw, nxt)).fillna(1.0)
+        mult = fx.loc[on, "id"].map(availability(cur.players, gw, nxt, deadlines)).fillna(1.0)
         fx.loc[on, "xp"] = fx.loc[on, "xp_raw"] * mult
         fx.loc[on, "p_play"] = fx.loc[on, "p_play"] * mult
         fx.loc[on, "p_60"] = fx.loc[on, "p_60"] * mult

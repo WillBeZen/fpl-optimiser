@@ -82,6 +82,24 @@ def test_availability_flags():
     assert later.to_dict() == {1: 1.0, 2: 1.0, 3: 1.0, 4: 0.0, 5: 1.0}
 
 
+def test_availability_follows_the_return_date_in_the_news():
+    players = pd.DataFrame({"id": [1, 2, 3, 4],
+                            "status": ["i", "s", "i", "d"],
+                            "chance_of_playing_next_round": [0, 0, 0, 50],
+                            "news": ["Thigh injury - Expected back 8 Nov", "Suspended until 31 Oct",
+                                     "Knee injury - Unknown return date", "Knock - 50% chance of playing"]})
+    deadlines = {9: pd.Timestamp("2026-10-31 11:00", tz="UTC"), 10: pd.Timestamp("2026-11-06 18:30", tz="UTC"),
+                 11: pd.Timestamp("2026-11-21 11:00", tz="UTC"), 12: pd.Timestamp("2026-11-27 18:30", tz="UTC"),
+                 13: pd.Timestamp("2026-12-01 18:30", tz="UTC"), 14: pd.Timestamp("2026-12-05 11:00", tz="UTC")}
+    by_gw = {gw: predict.availability(players, gw, 9, deadlines).to_dict() for gw in range(9, 15)}
+    assert [by_gw[g][1] for g in range(9, 15)] == [0, 0, 1, 1, 1, 1]       # back 8 Nov: misses GW10
+    assert [by_gw[g][2] for g in range(9, 15)] == [0, 1, 1, 1, 1, 1]       # suspension ends 31 Oct
+    assert [by_gw[g][3] for g in range(9, 15)] == [0, *config.UNKNOWN_RETURN_RAMP, 1, 1]
+    assert [by_gw[g][4] for g in range(9, 15)] == [0.5, 1, 1, 1, 1, 1]
+    assert predict.return_date("Expected back 2 Jan", pd.Timestamp("2026-10-31")) == pd.Timestamp("2027-01-02")
+    assert predict.return_date("Unknown return date", pd.Timestamp("2026-10-31")) is None
+
+
 def test_forecast_from_a_filed_store(two_seasons):
     fc = predict.forecast(horizon=3)
     assert fc.next_gw == 3 and fc.gameweeks == [3, 4, 5]

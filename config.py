@@ -121,6 +121,13 @@ FREE_TRANSFER_VALUE = 1.5
 # 2.14, rank correlation 0.645 -> 0.659, top-11 points 55.8 -> 56.7. 0 = points model only.
 EVENT_MODEL_WEIGHT = 0.5
 
+# Injured with no return date (Section 3). FPL's chance of playing covers the next
+# gameweek only. When the news gives a date ("Expected back 8 Nov", "Suspended until
+# 31 Oct") the player counts from the first gameweek after it; when it says "Unknown
+# return date" he comes back gradually over the following gameweeks at these chances,
+# then fully (so the planner neither writes him off nor counts on him straight away).
+UNKNOWN_RETURN_RAMP = (0.25, 0.5, 0.75)
+
 # Opponent archetypes (Section 2). Number of defensive "styles" the 20 teams are
 # clustered into, for interpretation and for Claude's narrative.
 ARCHETYPE_K = 3
@@ -203,6 +210,7 @@ def validate() -> None:
     assert 0 <= BENCH_WEIGHT < 1
     assert FREE_TRANSFER_VALUE >= 0
     assert 0 <= EVENT_MODEL_WEIGHT <= 1
+    assert all(0 <= x <= 1 for x in UNKNOWN_RETURN_RAMP)
     assert PREV_SEASON_GAP_GW >= 0
     assert 0 < PREV_SEASON_WEIGHT <= 1, "a previous season should never outweigh this one"
     assert set(PLAYER_ARCHETYPE_K) == set(POSITION_QUOTA)
