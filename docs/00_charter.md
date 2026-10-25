@@ -87,8 +87,9 @@ human-readable explanation and for Claude's narrative.
   captain and vice under all hard rules.
 - [x] **5 — Multi-week planning.** One MILP over a rolling 5-week horizon from your
   real squad (public FPL data: picks, bank, estimated free transfers, FPL selling
-  prices); bank vs spend vs −4 hit only when the gain clears the threshold.
-  *Not yet:* chip timing.
+  prices); bank vs spend vs −4 hit only when the gain clears the threshold; chips
+  (wildcard, free hit, bench boost, triple captain) played when they beat their
+  threshold, the first set by GW19 and the second after.
 - [x] **6 — Claude advisor.** Claude Sonnet 5.5 + web search → a strict structured
   answer: 0–100 action score, verdict, flagged players with sources; news adjusts,
   never overrides, the maths. Refusal fallback on; never crashes the run.
@@ -97,7 +98,6 @@ human-readable explanation and for Claude's narrative.
   scratch, predictions, the model check, and the player analysis.
 
 ## What's next
-- **Chips:** plan the wildcard, free hit, bench boost and triple captain.
 - **Full 2025/26 match data** from a public archive (only the top 50 players' matches
   were saved before the API moved on), for a stronger, less biased model.
 - **Richer opponent stats** (team xG conceded, pressing) if a source becomes

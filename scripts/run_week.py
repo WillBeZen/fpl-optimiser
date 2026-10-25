@@ -79,23 +79,30 @@ def main() -> int:
     wildcard = squad.pick_squad(nxt)
 
     team_id = args.team_id or (int(os.environ["FPL_TEAM_ID"]) if os.environ.get("FPL_TEAM_ID", "").strip().isdigit() else None)
-    plan = baseline = mine = ladder = budget = None
+    plan = baseline = mine = ladder = budget = chip_grid = None
     if team_id:
         print(f"4/6 planning transfers for team {team_id} ...")
         mine = my_team.load(team_id, season_store.load(fc.season).bootstrap, fc.next_gw)
         if args.free_transfers is not None:
             mine.free_transfers = args.free_transfers
-        plan = planner.plan(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers, mine.sell_prices)
+        chips_left = "; ".join(f"GW{a}-{b}: " + (", ".join(planner.CHIP_NAMES[k] for k in names) or "none")
+                               for (a, b), names in mine.chips_available.items())
+        print(f"    chips left: {chips_left or 'none'}")
+        plan = planner.plan(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers, mine.sell_prices,
+                            chips=mine.chips_available)
         baseline = planner.plan(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers,
                                 mine.sell_prices, max_transfers_per_gw=0)
+        proven = "" if plan.stats["proven_optimal"] else f", best found in the {planner.CHIP_SOLVE_SECONDS}s chip limit"
         print(f"    solved in {plan.stats['solve_seconds']:.0f}s ({plan.stats['candidates']} of "
-              f"{plan.stats['players']} players considered)")
+              f"{plan.stats['players']} players considered{proven})")
         if not args.quick:
-            print("    what-ifs: 0..n transfers this week, and more money ...")
+            print("    what-ifs: 0..n transfers this week, more money, each chip in each gameweek ...")
             inputs = whatif.plan_inputs(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers,
-                                        mine.sell_prices)
-            ladder = whatif.transfer_ladder(inputs)
-            budget = whatif.budget_value(inputs, base=plan)
+                                        mine.sell_prices, chips=mine.chips_available)
+            held = whatif.hold_chips(inputs, plan)          # transfers and money, the plan's chips kept
+            ladder = whatif.transfer_ladder(held)
+            budget = whatif.budget_value(held, base=plan)
+            chip_grid = whatif.chip_weeks(inputs, chosen=plan)
     else:
         print("4/6 no FPL_TEAM_ID set: skipping your transfer plan (best squad from scratch only)")
 
@@ -133,7 +140,7 @@ def main() -> int:
     print("6/6 writing the report ...")
     week = report.WeekResults(forecast=fc, wildcard=wildcard, plan=plan, baseline=baseline,
                               team=mine, advice=advice, backtest=bt, table=table, ladder=ladder,
-                              budget=budget)
+                              budget=budget, chips=chip_grid)
     out = report.build_report(fc.season, week=week).write()
 
     print()
@@ -141,7 +148,10 @@ def main() -> int:
         first = plan.weeks[0]
         moves = (", ".join(f"{o} -> {i}" for o, i in zip(first.sold["web_name"], first.bought["web_name"]))
                  or "no transfers (bank it)")
-        print(f"GW{fc.next_gw}: {moves}; hits {first.hits}; captain {first.captain}")
+        chip = f"; chip: {planner.CHIP_NAMES[first.chip]}" if first.chip else ""
+        print(f"GW{fc.next_gw}: {moves}; hits {first.hits}; captain {first.captain}{chip}")
+        print("Chips in the plan: " + (", ".join(f"{planner.CHIP_NAMES[k]} GW{g}" for k, g in plan.chips.items())
+                                       or f"none in GW{fc.next_gw}-{fc.gameweeks[-1]}"))
         print(f"Plan vs no transfers over GW{fc.next_gw}-{fc.gameweeks[-1]}: "
               f"{plan.net - baseline.xp:+.1f} expected points (after hits)")
     else:

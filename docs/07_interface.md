@@ -13,11 +13,12 @@ python scripts/run_week.py --open
 | 1 | refresh FPL data into the season store, and check `config.py`'s rules against FPL's |
 | 2 | fit the models on every filed season; expected points for the next gameweeks (the blend of the points and event models) |
 | 3 | the best squad from scratch (what a wildcard would build) |
-| 4 | **your transfer plan**, if `FPL_TEAM_ID` is set, plus the what-ifs (0..n transfers, more money) |
+| 4 | **your transfer plan** with its chips, if `FPL_TEAM_ID` is set, plus the what-ifs (0..n transfers, more money, each chip in each gameweek) |
 | 5 | **Claude's news check** on the plan, if `ANTHROPIC_API_KEY` is set |
 | 6 | the walk-forward backtest of every model, then `reports/fpl_report.html` and the headline in the terminal |
 
-A full run takes about 3–4 minutes (the backtest and the what-ifs are most of it).
+A full run takes about 5–6 minutes (the backtest and the what-ifs are most of it; the
+plan with chips about a minute and a half).
 
 Options: `--no-pull` (use the data already filed), `--team-id N`, `--free-transfers N`
 (FPL doesn't publish them; the estimate comes from your history), `--horizon N`,
@@ -81,11 +82,13 @@ model responds to the opponent; the minutes and points models and what they lean
 (permutation importance); the event model's formulas and average points by source; the
 blend and FPL's flags (who they cut); and the walk-forward backtest of every method.
 
-**6 · The planner** — the integer program in eleven stages, with your numbers: inputs
+**6 · The planner** — the integer program in twelve stages, with your numbers: inputs
 (bought for / now / sells for, bank, free transfers, dials); the candidate pool; the
-problem's variables, rules and objective, and its size and solve time; the no-transfer
-baseline; **how many transfers** (each extra move's worth, including whether a hit
-pays); the plan week by week (free transfers carried, bank); **why these moves** and the
+problem's variables, rules and objective, and its size, solve time and whether it was
+proven optimal; the no-transfer baseline; **how many transfers** (each extra move's
+worth, including whether a hit pays); the plan week by week (free transfers carried,
+chip, bank); **chips** (sets left, when the plan plays them, each chip in its best week
+and a chip × gameweek grid against the thresholds); **why these moves** and the
 alternatives; what's binding (clubs at the limit, formation) and **what more money would
 buy**; the objective piece by piece; captain and bench each week; and the wildcard squad
 for comparison.

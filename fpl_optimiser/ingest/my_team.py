@@ -16,16 +16,25 @@ Two things FPL doesn't publish are reconstructed:
 Both are best estimates: one-off FPL top-ups (e.g. extra transfers around AFCON)
 aren't visible, so the runner lets you override free transfers.
 
+Chips still available come from the chips you've played (history): each chip set
+covers a range of gameweeks (chip_windows: GW1 to config.CHIP_SPLIT_GW, then the
+rest), a chip played in that range uses the set's copy, and a set whose last
+gameweek has passed has expired (chips_available).
+
 Fetching is thin and cached briefly; `assemble()` is pure and tested on mock payloads.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import config
 from fpl_optimiser.ingest import fpl_api
 
 _TTL_H = 0.25      # your team changes when you make transfers: keep the cache short
+
+# FPL's chip names (history, picks) -> ours (config.CHIPS)
+FPL_CHIPS = {"wildcard": "wildcard", "freehit": "free_hit", "bboost": "bench_boost",
+             "3xc": "triple_captain"}
 
 
 def selling_price(purchase: float, now: float) -> float:
@@ -45,6 +54,29 @@ class MyTeam:
     purchase_prices: dict[int, float]
     chips_used: list[dict]          # [{'name': 'wildcard', 'event': 5}, ...]
     note: str = ""
+    # chips you can still play, per set: {(first gw, last gw): ('wildcard', ...)}
+    chips_available: dict[tuple[int, int], tuple[str, ...]] = field(default_factory=dict)
+
+
+def chip_windows() -> list[tuple[int, int]]:
+    """The gameweeks each chip set can be played in, as (first, last): with two sets,
+    GW1 to config.CHIP_SPLIT_GW and the gameweeks after it."""
+    if config.CHIP_SETS_PER_SEASON == 1:
+        return [(1, config.GAMEWEEKS_IN_SEASON)]
+    return [(1, config.CHIP_SPLIT_GW), (config.CHIP_SPLIT_GW + 1, config.GAMEWEEKS_IN_SEASON)]
+
+
+def chips_available(chips_used: list[dict], next_gw: int) -> dict[tuple[int, int], tuple[str, ...]]:
+    """The chips you can still play from `next_gw`, per set: {(first gw, last gw): chips}
+    (config.CHIPS names, in that order). A set that ended before `next_gw` is left out:
+    its unused chips expired. `chips_used` is FPL's history list ({'name', 'event'})."""
+    out = {}
+    for first, last in chip_windows():
+        if last < next_gw:
+            continue
+        used = {FPL_CHIPS.get(c["name"], c["name"]) for c in chips_used if first <= c["event"] <= last}
+        out[(first, last)] = tuple(c for c in config.CHIPS if c not in used)
+    return out
 
 
 def free_transfers(history: dict, next_gw: int) -> int:
@@ -88,7 +120,8 @@ def assemble(manager_id: int, history: dict, transfers: list[dict], picks: dict,
     return MyTeam(manager_id=manager_id, gw=picks.get("entry_history", {}).get("event", next_gw - 1),
                   squad_ids=squad, bank=picks.get("entry_history", {}).get("bank", 0) / 10,
                   free_transfers=free_transfers(history, next_gw), sell_prices=sell,
-                  purchase_prices=paid, chips_used=history.get("chips", []), note=note)
+                  purchase_prices=paid, chips_used=history.get("chips", []), note=note,
+                  chips_available=chips_available(history.get("chips", []), next_gw))
 
 
 def load(manager_id: int, bootstrap: dict, next_gw: int) -> MyTeam:

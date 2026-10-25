@@ -25,7 +25,7 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (114 tests today)
+python -m pytest -q                            # MUST stay green (124 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
@@ -53,7 +53,7 @@ fpl_optimiser/
     fbref.py                  FBref via soccerdata (needs Chrome) — a backend     [done]
     understat.py              Understat plain-HTTP (PPDA) — a backend, often blocked [done]
     team_map.py               FPL<->source team-name reconciliation              [done]
-    my_team.py                your squad, bank, free transfers, selling prices   [done]
+    my_team.py                your squad, bank, free transfers, selling prices, chips left [done]
     rules_check.py            config.py vs FPL's published rules                 [done]
   features/
     recency.py                exponential decay weighting                        [done]
@@ -72,9 +72,9 @@ fpl_optimiser/
     explain.py                numbers behind the report's "The model" tab        [done]
   optimise/
     squad.py                  single-gameweek MILP: 15, XI, captain, vice        [done]
-    planner.py                multi-week MILP: transfers, banking, hits          [done]
+    planner.py                multi-week MILP: transfers, banking, hits, chips   [done]
     pool.py                   drops dominated players before solving             [done]
-    whatif.py                 transfer ladder, budget value, alternatives, ...   [done]
+    whatif.py                 transfer ladder, budget value, alternatives, chip grid, ... [done]
   claude/advisor.py           Claude news check -> 0-100 score (web search)     [done]
   app/
     charts.py                 Plotly figure builders (light + dark, validated palette) [done]
@@ -197,14 +197,27 @@ reports/                      generated HTML (git-ignored)
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your
   history; one-off FPL top-ups aren't visible, so `run_week.py --free-transfers N`
   overrides it.
+- **Chips make CBC slow** (267 s for the first version, no answer): it struggles to *find* a
+  plan once chip decisions are in. `planner._solve_with_chips` hands it one: the no-chip
+  plan, then the chips worth playing on its squads, then the best plan with them. The full
+  problem then stops after `planner.CHIP_SOLVE_SECONDS`; `Plan.stats["proven_optimal"]`
+  says whether it finished. Forced chips (`play_chips`, the what-ifs) skip all that.
+- **CBC 2.10 misreads a warm start in a maximisation** (it reads the starting objective
+  with the wrong sign, so the start is useless). `planner._solve_from` solves the
+  minimisation of minus the objective instead.
+- **A free hit doesn't depend on the plan**: with prices held fixed, transfers keep bank +
+  squad value constant, so each week's free-hit squad is a one-week `pick_squad` made
+  up front. Don't model it as a second squad inside the MILP: that's 2,880 more yes/no
+  variables and 3x slower.
 
 ## Roadmap
 
 - [x] 0 Scaffold · [x] 1 Data ingestion · [x] 2 Feature engineering
-- [x] 3 Prediction model · [x] 4 Optimisation · [x] 5 Multi-week planning (no chips)
+- [x] 3 Prediction model · [x] 4 Optimisation · [x] 5 Multi-week planning
 - [x] 6 Claude advisor · [x] 7 Interface (`scripts/run_week.py` + tabbed HTML dashboard)
 - [x] Event model + blend (backtested), return dates from injury news, planner what-ifs
-- [ ] **Chips** — plan wildcard / free hit / bench boost / triple captain in planner.py.
+- [x] **Chips** — wildcard / free hit / bench boost / triple captain planned in planner.py
+      (thresholds `CHIP_THRESHOLD_POINTS`, the GW19 split, a chip × gameweek what-if).
 - [ ] **Full 2025/26 match data** from a public archive (only the top 50 were filed).
 - [ ] Richer opponent stats (team xGA, PPDA) if a source becomes reachable.
 

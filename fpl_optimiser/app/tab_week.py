@@ -14,7 +14,7 @@ import config
 from fpl_optimiser.app import charts
 from fpl_optimiser.app.common import Context, WeekResults, next_fixtures, own, pct, player_info
 from fpl_optimiser.app.html import Report, Section, card, data_table, esc, html_table, link, note, table
-from fpl_optimiser.optimise import whatif
+from fpl_optimiser.optimise import planner, whatif
 
 TAB = "week"
 
@@ -48,12 +48,18 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
                   ("Transfers this week", str(len(first.bought)),
                    f"{first.hits} hit(s), {first.free_transfers} free available"),
                   ("Captain", first.captain, f"team expects {first.xp:.1f} pts in GW{gw}")]
+        if first.chip:
+            tiles.append(("Chip this week", planner.CHIP_NAMES[first.chip],
+                          "the plan's chip for GW" + str(gw)))
         t = w.team
         sec.intro = (f"From your squad (GW{t.gw} picks), £{t.bank:.1f}m in the bank and "
                      f"{t.free_transfers} free transfer(s) (estimated from your history; override "
                      f"with --free-transfers), the planner looked {len(fc.gameweeks)} gameweeks "
                      f"ahead. A -4 hit is only taken if it gains more than "
-                     f"{config.HIT_THRESHOLD_POINTS:g} expected points. {t.note}").strip()
+                     f"{config.HIT_THRESHOLD_POINTS:g} expected points. "
+                     + (f"Chips planned: " + ", ".join(f"{planner.CHIP_NAMES[k]} GW{g}" for k, g in w.plan.chips.items())
+                        + ". " if w.plan.chips else "No chip planned in the horizon. ")
+                     + t.note).strip()
         if len(first.bought):
             why = whatif.transfer_reasons(first, fc.xp)
             gw_cols = [c for c in why.columns if c.startswith("GW")]
@@ -73,7 +79,8 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
             rows.append({"GW": pw.gw,
                          "Out": ", ".join(pw.sold["web_name"]) or "-",
                          "In": ", ".join(pw.bought["web_name"]) or "-",
-                         "Hits": pw.hits, "Free transfers": pw.free_transfers,
+                         "Hits": pw.hits, "Chip": planner.CHIP_NAMES[pw.chip] if pw.chip else "-",
+                         "Free transfers": pw.free_transfers,
                          "Captain": pw.captain, "Expected pts": round(pw.xp, 1),
                          "No transfers": round(bw.xp, 1)})
         sec.blocks += [

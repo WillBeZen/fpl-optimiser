@@ -143,7 +143,7 @@ def test_week_sections_with_a_plan_and_a_news_check():
     assert {"squad-grid"} <= set(tabs["squad"]) and {"captaincy", "market", "targets"} <= set(tabs["scout"])
     assert tabs["model"][0] == "m-data" and tabs["model"][-1] == "backtest"
     assert tabs["planner"] == ["p-inputs", "p-pool", "p-problem", "p-baseline", "p-ladder", "p-plan",
-                               "p-why", "p-limits", "p-objective", "p-captain", "wildcard"]
+                               "p-chips", "p-why", "p-limits", "p-objective", "p-captain", "wildcard"]
     assert len({s.id for s in r.sections}) == len(r.sections)          # ids are unique
     labels = {label: value for label, value, _ in r.tiles}
     assert labels["Next deadline"] == "GW9" and labels["News check"] == "82/100"
@@ -153,6 +153,29 @@ def test_week_sections_with_a_plan_and_a_news_check():
     assert 'href="javascript' not in page                                # unsafe link dropped
     assert '<a href="https://example.com/a" target="_blank" rel="noopener noreferrer">' in page
     assert "12,000 input and 3,000 output tokens, about $0.07" in page   # 0.024 + 0.03 + 2 searches
+
+
+def test_the_chip_stage_shows_sets_left_the_plan_and_each_chip_in_each_week():
+    from fpl_optimiser.optimise import whatif
+    week = _week()
+    fc, ids, bank = week.forecast, list(week.team.squad_ids), week.team.bank
+    xp = fc.xp.copy()
+    xp.loc[xp["gw"] == 10, "xp"] *= 2                          # a double in GW10: bench boost
+    fc.xp = xp
+    chips = {(1, 19): ("free_hit", "bench_boost"), (20, 38): config.CHIPS}
+    week.team.chips_available = chips
+    inputs = whatif.plan_inputs(xp, fc.players, ids, bank, 1, chips=chips)
+    week.plan = planner.plan(**inputs)
+    week.chips = whatif.chip_weeks(inputs, chosen=week.plan)
+    assert week.plan.chips == {"bench_boost": 10}
+    r, page = _render(week)
+    sec = next(s for s in r.sections if s.id == "p-chips")
+    text = "".join(sec.blocks)
+    assert "This plan plays the bench boost in GW10." in text and "planned for GW10" in text
+    assert "GW1-19" in text and "free hit, bench boost" in text and "not yet" in text   # second set
+    assert "✓" in text and "Chip this week" not in {label for label, _, _ in r.tiles}   # GW9 has none
+    plan_rows = next(s for s in r.sections if s.id == "p-plan")
+    assert "bench boost" in "".join(plan_rows.blocks)
 
 
 def test_week_sections_without_a_team_or_the_advisor():

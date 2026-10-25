@@ -37,6 +37,7 @@ class WeekResults:
     table: pd.DataFrame | None = None      # the multi-season training table
     ladder: pd.DataFrame | None = None     # optimise.whatif.transfer_ladder(...)
     budget: pd.DataFrame | None = None     # optimise.whatif.budget_value(...)
+    chips: pd.DataFrame | None = None      # optimise.whatif.chip_weeks(...)
 
 
 @dataclass

@@ -235,3 +235,127 @@ def test_alternatives_reasons_constraints_and_objective_parts():
 
     parts = whatif.objective_parts(p)
     assert parts["value"].sum() == pytest.approx(p.objective, abs=0.05)   # tie-breaks are tiny
+
+
+# --------------------------------------------------------------------------- #
+# chips: wildcard, free hit, bench boost, triple captain
+# --------------------------------------------------------------------------- #
+ALL_CHIPS = {(1, 19): config.CHIPS}          # every chip, first set (not expiring in GW1-3)
+
+
+def test_chips_available_per_set_from_your_history():
+    used = [{"name": "3xc", "event": 3}, {"name": "bboost", "event": 21}]
+    assert my_team.chip_windows() == [(1, config.CHIP_SPLIT_GW), (config.CHIP_SPLIT_GW + 1, 38)]
+    assert my_team.chips_available(used[:1], next_gw=9) == {
+        (1, 19): ("wildcard", "free_hit", "bench_boost"), (20, 38): config.CHIPS}
+    # after the split the first set has expired, chips unused or not
+    assert my_team.chips_available(used, next_gw=25) == {(20, 38): ("wildcard", "free_hit", "triple_captain")}
+    assert my_team.chips_available([], next_gw=19)[(1, 19)] == config.CHIPS   # GW19 is still the first half
+
+
+def test_a_big_double_gameweek_triggers_the_bench_boost():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c)
+    flat = planner.plan(xp, c, mine, bank, free_transfers=1, chips={(1, 19): ("bench_boost",)})
+    assert flat.chips == {}                                   # an ordinary bench isn't worth it
+    xp.loc[xp["gw"] == 2, "xp"] *= 2                          # everyone plays twice in GW2
+    p = planner.plan(xp, c, mine, bank, free_transfers=1, chips={(1, 19): ("bench_boost",)})
+    assert p.chips == {"bench_boost": 2}
+    week = p.weeks[1]
+    team = week.team
+    bench = team.loc[team["role"] == "bench", "xp"].sum()
+    assert week.chip_gain == pytest.approx(bench) and bench * (1 - config.BENCH_WEIGHT) > 12
+    assert week.xp == pytest.approx(team.loc[team["role"] == "XI", "xp"].sum()
+                                    + team.loc[team["captain"], "xp"].sum() + bench)
+
+
+def test_a_blank_gameweek_triggers_the_free_hit_and_the_squad_comes_back():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c)
+    blank = c.loc[c["id"].isin(mine), "team_name"].value_counts().index[:4]   # most of my clubs
+    xp.loc[(xp["gw"] == 2) & xp["id"].isin(c.loc[c["team_name"].isin(blank), "id"]), "xp"] = 0.0
+    p = planner.plan(xp, c, mine, bank, free_transfers=1, chips=ALL_CHIPS)
+    assert p.chips == {"free_hit": 2}
+    hit = p.weeks[1]
+    assert len(hit.bought) >= 5 and hit.hits == 0 and hit.bank_after >= 0
+    assert not set(hit.team.loc[hit.team["role"] == "XI", "team_name"]) & set(blank)
+    assert set(p.weeks[2].team["id"]) == set(p.weeks[0].team["id"]) == set(mine)   # back, untouched
+    assert [w.free_transfers for w in p.weeks] == [1, 2, 3]   # free transfers kept through it
+
+
+def test_a_wildcard_rebuilds_a_broken_squad_without_hits():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c)
+    xp.loc[xp["id"].isin(mine[:10]), "xp"] = 0.0             # ten of my players out for good
+    p = planner.plan(xp, c, mine, bank, free_transfers=1, chips={(1, 19): ("wildcard",)})
+    assert p.chips == {"wildcard": 1}
+    first = p.weeks[0]
+    assert len(first.bought) >= 8 and first.hits == 0 and p.hit_cost == 0
+    assert first.free_after == 2                             # the free transfer is kept, plus one
+
+
+def test_one_chip_a_week_each_once_and_the_triple_captain_on_a_huge_week():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c)
+    star = squad.pick_squad(c).xi.sort_values("xp").iloc[-1]["id"]
+    xp.loc[xp["gw"] == 2, "xp"] *= 2                          # a double: bench boost and triple captain both want GW2
+    xp.loc[(xp["gw"] == 3) & (xp["id"] == star), "xp"] = 15.0   # ... and the star has a huge GW3
+    p = planner.plan(xp, c, mine, bank, free_transfers=1,
+                     chips={(1, 19): ("bench_boost", "triple_captain")})
+    assert p.chips == {"bench_boost": 2, "triple_captain": 3}
+    assert p.weeks[2].captain == c.set_index("id").at[star, "web_name"]
+    assert p.weeks[2].chip_gain == pytest.approx(15.0 * (config.TRIPLE_CAPTAIN_MULTIPLIER - config.CAPTAIN_MULTIPLIER))
+
+
+def test_the_split_rule_first_set_by_gw19_second_after():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c, gws=(18, 19, 20, 21))
+    xp.loc[xp["gw"] == 19, "xp"] *= 2.5                       # the biggest double, before the split
+    xp.loc[xp["gw"] == 21, "xp"] *= 2.0                       # a smaller one after it
+    second_only = {(1, 19): (), (20, 38): ("bench_boost",)}   # first-half bench boost already used
+    p = planner.plan(xp, c, mine, bank, free_transfers=1, chips=second_only)
+    assert p.chips == {"bench_boost": 21}                     # not GW19: that set's chip is gone
+    both = {(1, 19): ("bench_boost",), (20, 38): ("bench_boost",)}
+    p = planner.plan(xp, c, mine, bank, free_transfers=1, chips=both)
+    assert [w.chip for w in p.weeks] == [None, "bench_boost", None, "bench_boost"]   # one per set
+
+
+def test_a_chip_about_to_expire_is_played_for_any_gain():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c, gws=(17, 18, 19))                          # an ordinary bench: below the threshold
+    assert planner.plan(xp, c, mine, bank, 1, chips={(1, 38): ("bench_boost",)}).chips == {}
+    expiring = planner.plan(xp, c, mine, bank, 1, chips={(1, 19): ("bench_boost",)})
+    assert list(expiring.chips) == ["bench_boost"] and expiring.chip_charge == 0
+    assert planner.chip_charge("bench_boost", 1, (1, 19), [17, 18, 19]) == 0
+    assert planner.chip_charge("bench_boost", 1, (1, 38), [17, 18, 19]) == pytest.approx(
+        config.HORIZON_DECAY * config.CHIP_THRESHOLD_POINTS["bench_boost"])
+    with pytest.raises(ValueError, match="can't be played"):
+        planner.plan(xp, c, mine, bank, 1, chips={(20, 38): ("bench_boost",)}, play_chips={"bench_boost": 18})
+    with pytest.raises(ValueError, match="unknown chips"):
+        planner.plan(xp, c, mine, bank, 1, chips={(1, 19): ("bboost",)})        # FPL's name, not ours
+
+
+def test_chip_what_ifs_and_held_chips():
+    c = _candidates()
+    mine, bank = _my_team(c)
+    xp = _weeks(c)
+    xp.loc[xp["gw"] == 2, "xp"] *= 2
+    inputs = whatif.plan_inputs(xp, c, mine, bank, free_transfers=1, chips={(1, 19): ("bench_boost",)})
+    best = planner.plan(**inputs)
+    grid = whatif.chip_weeks(inputs, chosen=best)
+    assert list(grid["gw"]) == [1, 2, 3] and set(grid["chip"]) == {"bench_boost"}
+    top = grid.loc[grid["gain"].idxmax()]
+    assert top["gw"] == 2 and top["worth"] and top["planned"] and grid["planned"].sum() == 1
+    assert top["gain"] - top["must_beat"] == pytest.approx(best.objective - planner.plan(
+        **{**inputs, "chips": None}).objective, abs=1e-6)
+    held = whatif.hold_chips(inputs, best)
+    assert held["play_chips"] == {"bench_boost": 2} and planner.plan(**held).chips == {"bench_boost": 2}
+    parts = whatif.objective_parts(best)
+    assert "GW2 · bench boost" in set(parts["part"]) and "Chip thresholds" in set(parts["part"])
+    assert parts["value"].sum() == pytest.approx(best.objective, abs=0.05)
