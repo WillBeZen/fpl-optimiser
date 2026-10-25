@@ -41,13 +41,18 @@ def _player_team(rows: pd.DataFrame, fixtures: pd.DataFrame) -> pd.Series:
 
 
 def walk_forward(table: pd.DataFrame, season: str, rounds: list[int] | None = None,
-                 events_data: dict | None = None) -> pd.DataFrame:
+                 events_data: dict | None = None,
+                 half_life: float = config.RECENCY_HALF_LIFE_GW) -> pd.DataFrame:
     """Out-of-sample predictions for `season`'s rounds (default: all but its first).
 
-    table       : multi_season.build_all() — rows with season, round, targets, features.
-    events_data : optional events.season_data(season), to backtest the event model too.
-    Returns that season's rows for the tested rounds with xp (and xp_events), form
-    and season_avg.
+    table       : multi_season.build_all(half_life=...) — rows with season, round,
+                  targets, features (its form features carry the table's half-life).
+    events_data : optional events.season_data(season), to backtest the event model
+                  too (its team and player rates use `half_life`, so pass the same
+                  half-life the table was built with).
+    Returns that season's rows for the tested rounds with xp (and xp_events, its
+    points by source, and xp_blend), form, season_avg, and `trained_to`: the last
+    round of this season the models were fitted on (always before the row's round).
     """
     known = table.dropna(subset=["target_points", "minutes"])
     this = known[known["season"] == season]
@@ -59,15 +64,20 @@ def walk_forward(table: pd.DataFrame, season: str, rounds: list[int] | None = No
         if test.empty or train.empty:
             continue
         pred = points.fit(train).predict(test)
+        this_train = train[train["season"] == season]["round"]
+        test["trained_to"] = int(this_train.max()) if len(this_train) else 0
         test["xp"] = pred["xp"].to_numpy()
         test["p_play"], test["p_60"] = pred["p_play"].to_numpy(), pred["p_60"].to_numpy()
         if events_data is not None:
             d = events_data
             rows = test.assign(team=_player_team(test, d["fixtures"])).dropna(subset=["team"])
             ratings = events.team_ratings(d["fixtures"], d["teams"], r, d["history"],
-                                          d.get("prev_fixtures"), d.get("prev_teams"))
-            rates = events.player_rates(d["history"], d["players"], r, d.get("prior"))
-            test["xp_events"] = events.expected_events(rows, ratings, rates)["xp_events"].reindex(test.index)
+                                          d.get("prev_fixtures"), d.get("prev_teams"), half_life=half_life)
+            rates = events.player_rates(d["history"], d["players"], r, d.get("prior"), half_life=half_life)
+            ev = events.expected_events(rows, ratings, rates)
+            test["events_half_life"] = float(half_life)
+            for col in events.SOURCES + ["xp_events"]:
+                test[col] = ev[col].reindex(test.index)
             w = config.EVENT_MODEL_WEIGHT
             test["xp_blend"] = (1 - w) * test["xp"] + w * test["xp_events"]
         test["form"] = test["form_points_pg"].fillna(train["target_points"].mean())

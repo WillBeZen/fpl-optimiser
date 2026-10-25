@@ -20,8 +20,10 @@ def _bootstrap(first_deadline="2026-08-21T17:30:00Z"):
 
 
 def _summary(pid):
-    return {"history": [{"round": 1, "minutes": 90, "total_points": pid,
-                         "opponent_team": 2, "was_home": True}],
+    return {"history": [{"round": 1, "fixture": 1, "minutes": 90, "total_points": pid,
+                         "opponent_team": 2, "was_home": True},
+                        {"round": 2, "fixture": 2, "minutes": 0, "total_points": 0,   # not played yet
+                         "opponent_team": 2, "was_home": False}],
             "history_past": [{"season_name": "2025/26", "element_code": 1000 + pid,
                               "total_points": 100}]}
 
@@ -37,7 +39,14 @@ def fake_api(monkeypatch):
             return _bootstrap()
         if path == "fixtures":
             return [{"id": 1, "event": 1, "team_h": 1, "team_a": 2, "finished": True,
-                     "team_h_score": 1, "team_a_score": 0}]
+                     "team_h_score": 1, "team_a_score": 0},
+                    {"id": 2, "event": 2, "team_h": 2, "team_a": 1, "finished": False}]
+        if path.startswith("event/"):
+            return {"elements": [{"id": i, "stats": {"minutes": 90, "total_points": i},
+                                  "explain": [{"fixture": 1, "stats": [
+                                      {"identifier": "minutes", "points": 2, "value": 90},
+                                      {"identifier": "bonus", "points": i - 2, "value": i - 2}]}]}
+                                 for i in (1, 2, 3)]}
         return _summary(int(path.split("/")[1]))
 
     monkeypatch.setattr(fpl_api, "fetch", fetch)
@@ -56,12 +65,12 @@ def test_pull_live_files_by_season_and_resumes(tmp_path, fake_api):
     assert ss.pull_live(root=tmp_path, **QUIET) == "2026-27"
     assert sorted(f.name for f in (tmp_path / "2026-27").iterdir()) == [
         "bootstrap-static.json", "element-summary_1.json", "element-summary_2.json",
-        "element-summary_3.json", "fixtures.json"]
+        "element-summary_3.json", "event-live_1.json", "fixtures.json"]   # GW1 finished: filed
     assert ss.available(root=tmp_path) == ["2026-27"]
 
     n = len(fake_api)
     ss.pull_live(root=tmp_path, **QUIET)                  # fresh player files are kept
-    assert not [c for c in fake_api[n:] if c.startswith("element-summary")]
+    assert not [c for c in fake_api[n:] if c.startswith(("element-summary", "event/"))]
 
 
 def test_pull_live_refuses_a_frozen_season(tmp_path, fake_api):
@@ -77,7 +86,10 @@ def test_load_round_trip_and_season_check(tmp_path, fake_api):
     ss.pull_live(root=tmp_path, **QUIET)
     s = ss.load("2026-27", root=tmp_path)
     assert len(s.players) == 3 and s.players["code"].tolist() == [1001, 1002, 1003]
-    assert sorted(s.history["id"]) == [1, 2, 3]
+    assert sorted(s.history["id"]) == [1, 2, 3]                     # finished matches only
+    assert sorted(s.pending["id"]) == [1, 2, 3]                     # GW2 isn't finished
+    assert s.live.set_index("id")["total_points"].to_dict() == {1: 1, 2: 2, 3: 3}
+    assert s.live["explained"].all() and s.live["gw"].eq(1).all()
     assert set(s.past["element_code"]) == {1001, 1002, 1003}
     assert s.finished_gameweeks == 1
 

@@ -36,7 +36,7 @@ esc = html.escape
 OUTPUT = config.ROOT / "reports" / "fpl_report.html"
 
 TABS = [("week", "This week"), ("squad", "My squad"), ("fixtures", "Fixtures"),
-        ("scout", "Scout"), ("model", "The model"), ("planner", "The planner"),
+        ("scout", "Scout"), ("model", "The model"), ("accuracy", "Accuracy"), ("planner", "The planner"),
         ("analysis", "Player analysis"), ("glossary", "Glossary")]
 HEAT_STEPS = 7
 
@@ -119,6 +119,18 @@ def heat_class(value, lo: float, hi: float) -> str:
     return f"h{step}"
 
 
+# Over / under-prediction (predicted - actual), on the palette's diverging pair: blue =
+# scored MORE than predicted, red = scored LESS, grey = about right. Steps (points):
+ERROR_EDGES = (-4.5, -2.5, -0.75, 0.75, 2.5, 4.5)
+
+
+def error_class(err) -> str:
+    """'e0' (scored far more than predicted) .. 'e3' (about right) .. 'e6' (far less)."""
+    if err is None or (isinstance(err, float) and np.isnan(err)):
+        return ""
+    return f"e{int(np.searchsorted(ERROR_EDGES, float(err), side='right'))}"
+
+
 def _fmt(v, f) -> str:
     if v is None or (isinstance(v, float) and np.isnan(v)) or v is pd.NA:
         return "–"
@@ -148,7 +160,7 @@ def data_table(df: pd.DataFrame, *, id: str | None = None, fmt: dict | None = No
     shown = [c for c in df.columns if c not in hidden]
     head = "".join(f'<th scope="col">{esc(str(c))}</th>' for c in shown)
     rows = []
-    for _, r in df.iterrows():
+    for r in df.to_dict("records"):            # not iterrows: it turns ints into floats in mixed rows
         attrs = ""
         if row_attrs:
             for k, v in row_attrs(r).items():
@@ -156,14 +168,16 @@ def data_table(df: pd.DataFrame, *, id: str | None = None, fmt: dict | None = No
         cells = []
         for c in shown:
             v = r[c]
+            own = ""
             if isinstance(v, tuple):
-                num, text = v
+                num, text = v[0], v[1]
+                own = v[2] if len(v) > 2 else ""
             else:
                 num = v
                 text = str(v) if c in html_cols else esc(_fmt(v, fmt.get(c)))
             ok = isinstance(num, numeric) and not isinstance(num, bool) and not np.isnan(float(num))
             dv = f' data-v="{float(num):.6g}"' if ok else ""
-            cls = heat_class(float(num), *heat[c]) if ok and c in heat else ""
+            cls = own or (heat_class(float(num), *heat[c]) if ok and c in heat else "")
             cells.append(f"<td{dv}" + (f' class="{cls}"' if cls else "") + f">{text}</td>")
         rows.append(f"<tr{attrs}>{''.join(cells)}</tr>")
     cls = "tbl" + (" sortable" if sortable else "")
@@ -217,21 +231,26 @@ _HEAT_LIGHT = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95",
 _HEAT_LIGHT_INK = ["#0b0b0b"] * 4 + ["#ffffff"] * 3
 _HEAT_DARK = ["#0d366b", "#104281", "#184f95", "#1c5cab", "#3987e5", "#6da7ec", "#9ec5f4"]
 _HEAT_DARK_INK = ["#f0efec"] * 4 + ["#0b0b0b"] * 3
+# diverging blue <-> grey <-> red, each step's ink chosen for >= 4.5:1 contrast
+_ERR_LIGHT = ["#256abf", "#729dd0", "#b7cadf", "#f0efec", "#e4bdba", "#d57f7e", "#c43b3a"]
+_ERR_LIGHT_INK = ["#ffffff"] + ["#0b0b0b"] * 5 + ["#ffffff"]
+_ERR_DARK = ["#6da7ec", "#597da6", "#475768", "#383835", "#694543", "#a45554", "#e66767"]
+_ERR_DARK_INK = ["#0b0b0b", "#0b0b0b"] + ["#f0efec"] * 4 + ["#0b0b0b"]
 
 
-def _heat_vars(fills, inks) -> str:
-    return " ".join(f"--h{i}:{f}; --h{i}i:{k};" for i, (f, k) in enumerate(zip(fills, inks)))
+def _heat_vars(fills, inks, prefix: str = "h") -> str:
+    return " ".join(f"--{prefix}{i}:{f}; --{prefix}{i}i:{k};" for i, (f, k) in enumerate(zip(fills, inks)))
 
 
 _DARK = ("color-scheme: dark; --page:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; "
          "--muted:#898781; --line:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5; --accent-text:#6da7ec; "
          "--accent2:#d95926; --good:#0ca30c; --warn:#fab219; --bad:#d03b3b; "
-         + _heat_vars(_HEAT_DARK, _HEAT_DARK_INK))
+         + _heat_vars(_HEAT_DARK, _HEAT_DARK_INK) + " " + _heat_vars(_ERR_DARK, _ERR_DARK_INK, "e"))
 
 CSS = """
 :root { color-scheme: light; --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e;
         --muted:#898781; --line:#e1e0d9; --border:rgba(11,11,11,.10); --accent:#2a78d6; --accent-text:#256abf;
-        --accent2:#eb6834; --good:#006300; --warn:#8a5a00; --bad:#d03b3b; """ + _heat_vars(_HEAT_LIGHT, _HEAT_LIGHT_INK) + """ }
+        --accent2:#eb6834; --good:#006300; --warn:#8a5a00; --bad:#d03b3b; """ + _heat_vars(_HEAT_LIGHT, _HEAT_LIGHT_INK) + " " + _heat_vars(_ERR_LIGHT, _ERR_LIGHT_INK, "e") + """ }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { """ + _DARK + """ } }
 :root[data-theme="dark"] { """ + _DARK + """ }
 * { box-sizing: border-box; }
@@ -282,9 +301,13 @@ table.sortable th { cursor:pointer; user-select:none; }
 table.sortable th::after { content:" \\2195"; color:var(--muted); font-weight:400; }
 table.sortable th[aria-sort="ascending"]::after { content:" \\2191"; color:var(--ink2); }
 table.sortable th[aria-sort="descending"]::after { content:" \\2193"; color:var(--ink2); }
-""" + "".join(f"td.h{i} {{ background:var(--h{i}); color:var(--h{i}i); }}\n" for i in range(HEAT_STEPS)) + """
+""" + "".join(f"td.h{i} {{ background:var(--h{i}); color:var(--h{i}i); }}\n" for i in range(HEAT_STEPS)) + "".join(
+    f"td.e{i}, span.e{i} {{ background:var(--e{i}); color:var(--e{i}i); }}\n" for i in range(HEAT_STEPS)) + """
+.legend { display:flex; flex-wrap:wrap; gap:4px; margin:6px 10px; font-size:12px; color:var(--ink2); align-items:center; }
+.legend span[class^="e"] { padding:1px 8px; border-radius:4px; }
 tr.mine td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 td small { display:block; font-size:11px; opacity:.8; }
+.tbl .cell-wrap { white-space:normal; min-width:260px; max-width:640px; }
 p.note { color:var(--ink2); font-size:13px; margin:8px 10px; }
 a { color:var(--accent-text); }
 .verdict { display:flex; flex-wrap:wrap; gap:8px 24px; align-items:flex-start; padding:10px 10px 4px; }
@@ -351,7 +374,11 @@ JS = """
     panel.querySelectorAll('.chart[id^="fig-"]').forEach(function (el) {
       var id = el.id.slice(4);
       if (!FIGS[id] || drawn[id] === m || el.offsetParent === null) { return; }
-      Plotly.react(el, FIGS[id][m].data, FIGS[id][m].layout, {responsive: true, displaylogo: false});
+      // the box takes the figure's own height (a window resize makes Plotly fit the plot
+      // to its box), and Plotly gets a copy, so it can never edit the figure we keep
+      var fig = JSON.parse(JSON.stringify(FIGS[id][m]));
+      if (fig.layout && fig.layout.height) { el.style.height = fig.layout.height + 'px'; }
+      Plotly.react(el, fig.data, fig.layout, {responsive: true, displaylogo: false});
       drawn[id] = m;
     });
   }

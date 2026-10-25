@@ -139,6 +139,7 @@ def test_week_sections_with_a_plan_and_a_news_check():
     tabs = {}
     for s in r.sections:
         tabs.setdefault(s.tab, []).append(s.id)
+    assert tabs["accuracy"] == ["acc-summary"]                 # no replay this run: a note, not a crash
     assert tabs["week"] == ["week", "alerts", "advice", "captain"]
     assert {"squad-grid"} <= set(tabs["squad"]) and {"captaincy", "market", "targets"} <= set(tabs["scout"])
     assert tabs["model"][0] == "m-data" and tabs["model"][-1] == "backtest"
@@ -201,18 +202,29 @@ def test_the_full_dashboard_from_a_filed_store(two_seasons):
 
     fc = predict.forecast(horizon=3)
     table = multi_season.build_all()
-    bt = backtest.summarise(backtest.walk_forward(table, fc.season, events_data=events.season_data(fc.season)))
+    data = events.season_data(fc.season)
+    replay = backtest.walk_forward(table, fc.season, events_data=data)
+    bt = backtest.summarise(replay)
+    from fpl_optimiser.model import accuracy
+    ids = list(replay["id"].unique())
+    halves = accuracy.half_life_check(fc.season, [2], ids, (4.0, 8.0), data, base_preds=replay)
     wc = squad.pick_squad(_candidates())                       # ids from elsewhere: skipped, not a crash
-    week = report.WeekResults(fc, wc, backtest=bt, table=table)
+    week = report.WeekResults(fc, wc, backtest=bt, table=table, replay=replay, half_lives=halves,
+                              forecast_check=accuracy.forecast_path_check(table, fc.season, 2, replay))
     r = report.build_report(week=week)
     ids = {s.id for s in r.sections}
     assert {"ratings", "ticker-attack", "ticker-defence", "styles"} <= ids          # fixtures tab
     assert {"m-recency", "m-matchups", "m-events", "m-blend", "backtest"} <= ids    # model tab
     assert {"explorer", "market", "glossary", "link"} <= ids
+    assert {"acc-summary", "acc-gameweeks", "acc-players", "acc-calibration", "acc-halflife",
+            "acc-reconcile"} <= ids                                                 # accuracy tab
+    assert {"acc-gameweeks", "acc-scatter", "acc-calibration"} <= set(r.figures)
+    recon = next(s for s in r.sections if s.id == "acc-reconcile").blocks[0]
+    assert "✗ fail" not in recon and "The replay is exactly what the forecast would have said" in recon
     assert {"ratings", "m-weights", "m-prior-share", "m-response"} <= set(r.figures)
     assert "Blend (what the planner uses)" in set(bt["method"])
     page = report.render(r)
-    for tab in ("week", "squad", "fixtures", "scout", "model", "planner", "analysis", "glossary"):
+    for tab in ("week", "squad", "fixtures", "scout", "model", "accuracy", "planner", "analysis", "glossary"):
         assert f'id="tab-{tab}"' in page
     assert page.count('class="explore"') >= 2 and 'data-explorer="explorer-panels"' in page
     import re
@@ -231,3 +243,7 @@ def test_data_table_cells_sort_shade_and_escape():
     assert '<td data-v="6" class="h6">6.0<small>ARS</small></td>' in out
     assert '<tr data-pos="MID" class="mine">' in out and "_id" not in out
     assert html.heat_class(0, 0, 7) == "h0" and html.heat_class(99, 0, 7) == "h6" and html.heat_class(None, 0, 1) == ""
+    mixed = html.data_table(pd.DataFrame({"GW": [6], "Players": [240], "Bias": [-0.25]}))
+    assert '<td data-v="6">6</td>' in mixed and '<td data-v="240">240</td>' in mixed     # ints stay ints
+    assert html.error_class(-5) == "e0" and html.error_class(0.1) == "e3" and html.error_class(9) == "e6"
+    assert "el.style.height" in html.JS            # charts keep their height when the window resizes

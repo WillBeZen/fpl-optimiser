@@ -43,6 +43,8 @@ names and with different ids. So raw data is filed by season:
 data/raw/fpl/<season>/bootstrap-static.json     players, teams, gameweeks (season totals)
                      /fixtures.json             every fixture and result
                      /element-summary_<id>.json each player's per-match history (+ history_past)
+                     /event-live_<gw>.json      FPL's official points per finished gameweek, with
+                                                the breakdown by scoring source (filed once)
                      /FROZEN                    present => read-only
 ```
 
@@ -60,6 +62,9 @@ data/raw/fpl/<season>/bootstrap-static.json     players, teams, gameweeks (seaso
   still being played. `season_store.played_only` keeps a match record only once FPL
   marks its fixture finished, so a mid-gameweek pull never counts unplayed games as
   real ones (they used to drag form down and teach the models players didn't play).
+  The dropped records are kept as `Season.pending`; `Season.live` holds FPL's official
+  per-gameweek totals (`fpl_api.parse_event_live`), which the Accuracy tab reconciles
+  the match records against (see `docs/08_accuracy.md`).
 
 **What is filed today:** 2025/26 (frozen; full-season players, fixtures and results,
 but per-match history for only the top 50 players, because that is all that was

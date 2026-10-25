@@ -144,6 +144,10 @@ EVENT_MODEL_WEIGHT = 0.5
 # then fully (so the planner neither writes him off nor counts on him straight away).
 UNKNOWN_RETURN_RAMP = (0.25, 0.5, 0.75)
 
+# Accuracy check (the report's Accuracy tab). How many of the most recent finished
+# gameweeks to replay and compare with what players actually scored.
+ACCURACY_WINDOW_GW = 5
+
 # Opponent archetypes (Section 2). Number of defensive "styles" the 20 teams are
 # clustered into, for interpretation and for Claude's narrative.
 ARCHETYPE_K = 3
@@ -231,6 +235,7 @@ def validate() -> None:
     assert all(v >= 0 for v in CHIP_THRESHOLD_POINTS.values())
     assert 0 <= EVENT_MODEL_WEIGHT <= 1
     assert all(0 <= x <= 1 for x in UNKNOWN_RETURN_RAMP)
+    assert ACCURACY_WINDOW_GW >= 1
     assert PREV_SEASON_GAP_GW >= 0
     assert 0 < PREV_SEASON_WEIGHT <= 1, "a previous season should never outweigh this one"
     assert set(PLAYER_ARCHETYPE_K) == set(POSITION_QUOTA)

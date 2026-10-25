@@ -503,3 +503,80 @@ def heatmap(z: pd.DataFrame, title: str, theme: str = "light", fmt: str = "{:.1f
     fig.update_layout(**layout)
     fig.update_yaxes(automargin=True)
     return fig
+
+
+# --------------------------------------------------------------------------- #
+# Accuracy: predicted vs actual
+# --------------------------------------------------------------------------- #
+def accuracy_bars(gw: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """Total predicted vs total actual points per gameweek (two series)."""
+    t = THEMES[theme]
+    x = [f"GW{g}" for g in gw["GW"]]
+    fig = go.Figure([
+        go.Bar(x=x, y=gw["predicted"], name="Predicted", marker=dict(color=t["series"][0], cornerradius=4),
+               text=[f"{v:,.0f}" for v in gw["predicted"]], textposition="outside",
+               textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+               hovertemplate="%{x}: predicted %{y:,.1f} pts<extra></extra>"),
+        go.Bar(x=x, y=gw["actual"], name="Actual", marker=dict(color=t["series"][1], cornerradius=4),
+               text=[f"{v:,.0f}" for v in gw["actual"]], textposition="outside",
+               textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+               hovertemplate="%{x}: actually scored %{y:,.0f} pts<extra></extra>"),
+    ])
+    layout = _layout(t, "Predicted vs actual points per gameweek (all players in the pool)", "",
+                     "Points", height=380, legend_rows=2)
+    layout["xaxis"].update(showgrid=False)
+    layout.update(barmode="group", bargap=0.3, bargroupgap=0.1)
+    fig.update_layout(**layout)
+    return fig
+
+
+def accuracy_scatter(df: pd.DataFrame, theme: str = "light", n_labels: int = 6) -> go.Figure:
+    """Each player's total predicted vs total actual over the window, against the
+    line where they'd be equal; your players in the second colour.
+
+    df: web_name, team_name, position, predicted, actual, yours (bool)"""
+    t = THEMES[theme]
+    hi = float(np.ceil(max(df["predicted"].max(), df["actual"].max(), 1) / 5) * 5)
+    hover = ("<b>%{customdata[0]}</b> · %{customdata[1]} %{customdata[2]}"
+             "<br>predicted %{x:.1f}, scored %{y:.0f}<extra></extra>")
+    cd = ["web_name", "team_name", "position"]
+    others, yours = df[~df["yours"]], df[df["yours"]]
+    fig = go.Figure([
+        go.Scatter(x=[0, hi], y=[0, hi], mode="lines", name="Predicted = actual",
+                   line=dict(color=t["axis"], width=1, dash="dot"), hoverinfo="skip"),
+        go.Scatter(x=others["predicted"], y=others["actual"], mode="markers", name="Other players in the pool",
+                   marker=dict(size=8, color=t["series"][0], opacity=0.55, line=dict(width=1, color=t["surface"])),
+                   customdata=others[cd].to_numpy(), hovertemplate=hover),
+        go.Scatter(x=yours["predicted"], y=yours["actual"], mode="markers", name="Your players",
+                   marker=dict(size=11, color=t["series"][1], line=dict(width=2, color=t["surface"])),
+                   customdata=yours[cd].to_numpy(), hovertemplate=hover),
+    ])
+    picked = df.assign(gap=(df["actual"] - df["predicted"]).abs()).nlargest(n_labels, "gap")
+    for _, r in picked.iterrows():
+        _label(fig, t, r["predicted"], r["actual"], r["web_name"])
+    fig.update_layout(**_layout(t, "Player by player: predicted vs actual over the window",
+                                "Predicted points", "Actual points", height=520, legend_rows=3))
+    return fig
+
+
+def calibration_chart(cal: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """Mean actual vs mean predicted for player-gameweeks grouped by prediction: on
+    the dotted line, the model is calibrated."""
+    t = THEMES[theme]
+    hi = float(np.ceil(max(cal["predicted"].max(), cal["actual"].max(), 1)))
+    fig = go.Figure([
+        go.Scatter(x=[0, hi], y=[0, hi], mode="lines", name="Calibrated",
+                   line=dict(color=t["axis"], width=1, dash="dot"), hoverinfo="skip"),
+        go.Scatter(x=cal["predicted"], y=cal["actual"], mode="lines+markers+text", name="The model",
+                   line=dict(color=t["series"][0], width=2),
+                   marker=dict(size=10, color=t["series"][0], line=dict(width=2, color=t["surface"])),
+                   text=[f"n={n}" for n in cal["n"]], textposition="top left",
+                   textfont=dict(color=t["muted"], size=11),
+                   customdata=cal[["bin", "n"]].astype(str).to_numpy(),
+                   hovertemplate=("Predicted %{customdata[0]} (%{customdata[1]} player-gameweeks):<br>"
+                                  "averaged %{x:.2f} predicted, %{y:.2f} actual<extra></extra>")),
+    ])
+    layout = _layout(t, "Calibration: when the model predicts X, what happens?", "Average predicted points",
+                     "Average actual points", height=420, legend_rows=2)
+    fig.update_layout(**layout)
+    return fig

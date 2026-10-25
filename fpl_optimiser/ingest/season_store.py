@@ -6,6 +6,8 @@ ids every season. So each season's raw JSON is filed into its own folder:
     data/raw/fpl/<season>/bootstrap-static.json
                          /fixtures.json
                          /element-summary_<id>.json   one per player
+                         /event-live_<gw>.json        FPL's official points per
+                                                      finished gameweek (filed once)
                          /FROZEN                      present => read-only
 
 - `pull_live()` files the live season. The season is read from the data itself
@@ -20,7 +22,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -41,8 +43,10 @@ class Season:
     teams: pd.DataFrame        # fpl_api.parse_teams
     fixtures: pd.DataFrame     # fpl_api.parse_fixtures
     gameweeks: pd.DataFrame    # fpl_api.parse_gameweeks
-    history: pd.DataFrame      # per-match rows for every filed player, with `id`
+    history: pd.DataFrame      # per-match rows for every filed player, with `id` (finished matches)
     past: pd.DataFrame         # element-summary history_past: earlier seasons' totals, with `id`
+    pending: pd.DataFrame = field(default_factory=pd.DataFrame)   # match rows not finished yet
+    live: pd.DataFrame = field(default_factory=pd.DataFrame)      # official points per finished GW
 
     @property
     def finished_gameweeks(self) -> int:
@@ -120,6 +124,15 @@ def pull_live(limit: int | None = None, ttl_hours: float = 12.0, pause_s: float 
             time.sleep(pause_s)
         if i % 100 == 0 or i == len(ids):
             log(f"   {i}/{len(ids)} players  ({fetched} fetched, {i - fetched} already fresh)")
+
+    # each finished gameweek's official points: final once FPL has checked them, so
+    # filed once and never re-fetched
+    for e in bootstrap.get("events", []):
+        if e.get("finished") and e.get("data_checked", True):
+            f = d / f"event-live_{e['id']}.json"
+            if not f.exists():
+                _write(f, fpl_api.fetch(f"event/{e['id']}/live"))
+                time.sleep(pause_s)
     return season
 
 
@@ -127,8 +140,9 @@ def pull_live(limit: int | None = None, ttl_hours: float = 12.0, pause_s: float 
 # Reading a filed season back
 # --------------------------------------------------------------------------- #
 def assemble(season: str, bootstrap: dict, fixtures: list,
-             summaries: dict[int, dict]) -> Season:
-    """Pure: raw payloads -> a Season of tidy tables (`summaries` keyed by player id)."""
+             summaries: dict[int, dict], live: dict[int, dict] | None = None) -> Season:
+    """Pure: raw payloads -> a Season of tidy tables (`summaries` keyed by player id,
+    `live` by gameweek)."""
     teams = fpl_api.parse_teams(bootstrap)
 
     def stack(key: str) -> pd.DataFrame:
@@ -137,10 +151,13 @@ def assemble(season: str, bootstrap: dict, fixtures: list,
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     parsed = fpl_api.parse_fixtures(fixtures, teams)
+    played, pending = split_played(stack("history"), parsed)
+    frames = [fpl_api.parse_event_live(p, gw) for gw, p in sorted((live or {}).items())]
     return Season(season=season, bootstrap=bootstrap,
                   players=fpl_api.parse_players(bootstrap), teams=teams, fixtures=parsed,
                   gameweeks=fpl_api.parse_gameweeks(bootstrap),
-                  history=played_only(stack("history"), parsed), past=stack("history_past"))
+                  history=played, past=stack("history_past"), pending=pending,
+                  live=pd.concat(frames, ignore_index=True) if frames else pd.DataFrame())
 
 
 def played_only(history: pd.DataFrame, fixtures: pd.DataFrame) -> pd.DataFrame:
@@ -150,10 +167,16 @@ def played_only(history: pd.DataFrame, fixtures: pd.DataFrame) -> pd.DataFrame:
     not yet kicked off (0 minutes, 0 points) and those still being played. Counted
     as real games they would drag form down and teach the models that players
     didn't play, so they are dropped until the fixture is finished."""
+    return split_played(history, fixtures)[0]
+
+
+def split_played(history: pd.DataFrame, fixtures: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(finished matches, matches not finished yet): see played_only. Together they
+    are every match record FPL listed, so their points add up to its season totals."""
     if history.empty or "fixture" not in history or "finished" not in fixtures:
-        return history
-    done = set(fixtures.loc[fixtures["finished"] == True, "fixture_id"])  # noqa: E712
-    return history[history["fixture"].isin(done)].reset_index(drop=True)
+        return history, history.iloc[0:0]
+    done = history["fixture"].isin(set(fixtures.loc[fixtures["finished"] == True, "fixture_id"]))  # noqa: E712
+    return history[done].reset_index(drop=True), history[~done].reset_index(drop=True)
 
 
 def previous_season(season: str) -> str:
@@ -178,4 +201,5 @@ def load(season: str, root: Path | None = None) -> Season:
         raise ValueError(f"{d} holds {season_of(bootstrap)} data, not {season}")
     summaries = {int(f.stem.split("_")[1]): json.loads(f.read_text())
                  for f in d.glob("element-summary_*.json")}
-    return assemble(season, bootstrap, json.loads((d / "fixtures.json").read_text()), summaries)
+    live = {int(f.stem.split("_")[1]): json.loads(f.read_text()) for f in d.glob("event-live_*.json")}
+    return assemble(season, bootstrap, json.loads((d / "fixtures.json").read_text()), summaries, live)

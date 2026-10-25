@@ -25,7 +25,7 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (124 tests today)
+python -m pytest -q                            # MUST stay green (133 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
@@ -70,6 +70,8 @@ fpl_optimiser/
     backtest.py               walk-forward backtest: blend, points, events, baselines [done]
     predict.py                forecast(): blended xp for the next N gameweeks    [done]
     explain.py                numbers behind the report's "The model" tab        [done]
+    accuracy.py               predicted vs actual over the last N gameweeks, reconciled [done]
+    forecast_log.py           files each run's next-gameweek forecast            [done]
   optimise/
     squad.py                  single-gameweek MILP: 15, XI, captain, vice        [done]
     planner.py                multi-week MILP: transfers, banking, hits, chips   [done]
@@ -81,7 +83,7 @@ fpl_optimiser/
     html.py                   Section/Report/render, page CSS + JS, data_table   [done]
     common.py                 WeekResults, Context, shared lookups               [done]
     tab_*.py                  one module per dashboard tab (week, squad, fixtures,
-                              scout, model, planner)                             [done]
+                              scout, model, accuracy, planner)                   [done]
     report.py                 build_report: assembles the tabs (S7)              [done]
     glossary.py               the report's glossary (values read from config)    [done]
 scripts/
@@ -194,6 +196,11 @@ reports/                      generated HTML (git-ignored)
   check an answer against the full problem (a test does).
 - **The real Anthropic key costs money**: verify runs with `--no-advisor`; offline tests
   use a fake client. The last successful check is reused from `reports/last_advice.json`.
+- **FPL's season totals (bootstrap `total_points`) count matches still in play**; the
+  filed match records lag until the next refresh. Check finished gameweeks against
+  `event/<gw>/live` (filed as `event-live_<gw>.json`), never against bootstrap totals.
+- **The accuracy replay can't apply past injury flags** (FPL doesn't archive them);
+  `forecast_log` files each week's real forecast so later weeks can compare it.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your
   history; one-off FPL top-ups aren't visible, so `run_week.py --free-transfers N`
   overrides it.

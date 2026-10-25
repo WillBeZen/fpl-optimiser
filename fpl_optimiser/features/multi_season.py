@@ -10,6 +10,7 @@ with:
   sample_weight  1 for the latest season, config.PREV_SEASON_WEIGHT for the one
                  before, its square for the one before that... — for the model's
                  fit, so recent seasons count more.
+  half_life      the recency half-life the form features were built with
 """
 from __future__ import annotations
 
@@ -55,5 +56,6 @@ def build_all(seasons: list[str] | None = None,
     for season in seasons:
         tbl = build_season(season, half_life)
         tbl["sample_weight"] = config.PREV_SEASON_WEIGHT ** (latest - int(season[:4]))
+        tbl["half_life"] = float(half_life)          # recorded, so a replay can show what it used
         frames.append(tbl)
     return pd.concat(frames, ignore_index=True)

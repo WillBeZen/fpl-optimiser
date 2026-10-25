@@ -64,6 +64,7 @@ def test_backtest_only_ever_trains_on_the_past(monkeypatch):
     preds = backtest.walk_forward(t, "2026-27", rounds=[4, 5, 6])
     assert seen == [3, 4, 5]                             # predicting r used rounds < r only
     assert sorted(preds["round"].unique()) == [4, 5, 6]
+    assert (preds["trained_to"] == preds["round"] - 1).all()         # ...and each row records it
 
     summary = backtest.summarise(preds).set_index("method")
     needs_events = {"Event model", "Blend (what the planner uses)"}            # need events_data

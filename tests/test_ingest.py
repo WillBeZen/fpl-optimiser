@@ -208,3 +208,20 @@ def test_opponent_stats_fbref_schedule_without_xg(monkeypatch):
     assert abs(df.loc["Arsenal", "goals_conceded_per_game"] - 0.5) < 1e-9   # (0 + 1)/2
     assert abs(df.loc["Burnley", "goals_conceded_per_game"] - 2.5) < 1e-9   # (2 + 3)/2
     assert math.isnan(df.loc["Arsenal", "xga_per_game"])                    # no xG in schedule
+
+def test_event_live_points_are_parsed_by_source_and_checked():
+    payload = {"elements": [
+        {"id": 7, "stats": {"minutes": 180, "total_points": 13},              # a double gameweek
+         "explain": [{"fixture": 1, "stats": [{"identifier": "minutes", "points": 2},
+                                              {"identifier": "goals_scored", "points": 5}]},
+                     {"fixture": 2, "stats": [{"identifier": "minutes", "points": 2},
+                                              {"identifier": "goals_scored", "points": 5},
+                                              {"identifier": "yellow_cards", "points": -1}]}]},
+        {"id": 8, "stats": {"minutes": 0, "total_points": 0}, "explain": []},
+        {"id": 9, "stats": {"minutes": 90, "total_points": 6},                # breakdown incomplete
+         "explain": [{"fixture": 3, "stats": [{"identifier": "minutes", "points": 2}]}]}]}
+    live = fpl_api.parse_event_live(payload, gameweek=7).set_index("id")
+    assert live.loc[7, ["pts_minutes", "pts_goals_scored", "pts_yellow_cards"]].tolist() == [4, 10, -1]
+    assert live.loc[8, "pts_minutes"] == 0 and (live["gw"] == 7).all()
+    assert live["explained"].to_dict() == {7: True, 8: True, 9: False}
+    assert fpl_api.parse_event_live({}, 1).empty

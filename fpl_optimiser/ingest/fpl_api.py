@@ -192,6 +192,30 @@ def parse_player_history(element_summary: dict) -> pd.DataFrame:
     return pd.DataFrame(element_summary.get("history", []))
 
 
+def parse_event_live(payload: dict, gameweek: int) -> pd.DataFrame:
+    """FPL's official points for one gameweek (event/<gw>/live): one row per player
+    with minutes, total_points and the points from each scoring source, summed over
+    the gameweek's fixtures (`pts_<identifier>`, e.g. pts_goals_scored, pts_bonus).
+    `explained` = the sources add up to total_points (FPL's breakdown is complete)."""
+    rows = []
+    for e in payload.get("elements", []):
+        stats = e.get("stats", {})
+        row = {"id": e["id"], "gw": gameweek, "minutes": stats.get("minutes"),
+               "total_points": stats.get("total_points")}
+        for fx in e.get("explain", []):
+            for st in fx.get("stats", []):
+                key = f"pts_{st['identifier']}"
+                row[key] = row.get(key, 0) + st.get("points", 0)
+        rows.append(row)
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return pd.DataFrame(columns=["id", "gw", "minutes", "total_points", "explained"])
+    pts = [c for c in out.columns if c.startswith("pts_")]
+    out[pts] = out[pts].fillna(0)
+    out["explained"] = out[pts].sum(axis=1) == out["total_points"]
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Convenience: fetch + parse (network)
 # --------------------------------------------------------------------------- #

@@ -44,7 +44,7 @@ scratch, just no personal transfer plan or news check.
 ### First time
 1. Set up as above (Python 3.11+; tested on 3.13), then check everything works:
    ```bash
-   python -m pytest -q              # 124 offline tests, about a minute; never touches the network
+   python -m pytest -q              # 133 offline tests, about a minute; never touches the network
    python config.py                 # prints "config OK"
    python scripts/verify_setup.py   # live check: FPL reachable, opponent source, rules match FPL's
    python scripts/check_claude.py   # optional: one tiny Claude request (a fraction of a cent)
@@ -68,8 +68,10 @@ This one command, in about 3–5 minutes:
    spend, a −4 only if it clearly pays, plus what-ifs (0..n transfers, more money);
 5. asks Claude to check the news on the plan (if `ANTHROPIC_API_KEY` is set; costs a
    few cents, and the result is saved for reuse that gameweek);
-6. backtests the models on the season so far, writes `reports/fpl_report.html`, prints
-   the headline moves, and opens the dashboard.
+6. backtests the models on the season so far, checks how the last 5 finished gameweeks'
+   predictions lined up with what players scored (printing the reconciliation), writes
+   `reports/fpl_report.html`, prints the headline moves, and opens the dashboard. It also
+   files this week's forecast, so its accuracy can be checked once the gameweek is played.
 
 Then make the moves on the FPL site yourself: the system never touches your team.
 
@@ -97,7 +99,9 @@ server or internet needed (it's git-ignored; rebuild it each week). Tabs: **This
 (moves, alerts, news check, captain), **My squad** (each player fixture by fixture,
 event by event, and a player explorer), **Fixtures** (team ratings and tickers),
 **Scout** (the market, targets, differentials, price watch, set pieces), **The model**
-and **The planner** (every stage, with your numbers), **Player analysis** and a
+(every stage, with your numbers), **Accuracy** (predicted vs actual points over the last
+5 finished gameweeks for every player the planner considers, with a half-life check and
+a reconciliation checklist), **The planner** (every stage), **Player analysis** and a
 **Glossary**. Every table sorts by clicking a column; light and dark themes.
 
 ### Other scripts

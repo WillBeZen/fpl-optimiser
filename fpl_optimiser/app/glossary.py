@@ -200,6 +200,24 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "before it, then compared with what happened: how the model would really have done."),
             ("Form and Season average (baselines)", "Two simple rules the model has to beat: "
              "recency-weighted points per gameweek, and the plain average so far this season."),
+            ("Accuracy window", f"The last {config.ACCURACY_WINDOW_GW} finished gameweeks, replayed on the "
+             "Accuracy tab to see how predictions lined up with what players scored (ACCURACY_WINDOW_GW)."),
+            ("Replay", "Re-running a past gameweek exactly as the model would have predicted it at the "
+             "deadline: fitted only on earlier gameweeks, with config.py's half-life and the planner's blend. "
+             "FPL's injury flags at the time aren't archived, so they can't be replayed."),
+            ("Bias", "The average of predicted minus actual points. Positive: the model expected too much; "
+             "negative: players scored more than predicted."),
+            ("Typical miss", "The average size of a miss, in points per player-gameweek (MAE), whichever "
+             "direction it was in."),
+            ("Calibration", "Whether predictions mean what they say: players predicted 3-4 points should "
+             "average about 3.5. Shown by grouping player-gameweeks by their prediction."),
+            ("Top 11 captured", "The real points of the 11 players the model rated highest each gameweek, as a "
+             "share of the 11 who actually scored most (hindsight, so 100% is out of reach)."),
+            ("Reconciliation", "Checking the numbers against independent sources: the match records against "
+             "FPL's official gameweek totals, the replay against the live forecasting code, totals added up "
+             "different ways."),
+            ("Forecast log", "Each weekly run files its forecast for the next gameweek, injury flags and all, so "
+             "once that gameweek is played the Accuracy tab can compare the forecast actually made."),
             ("MAE", "Mean absolute error: the average miss, in points per fixture. Lower is better."),
             ("RMSE", "Root mean squared error: like MAE, but big misses count more. Lower is better."),
             ("Rank correlation", "How well a method puts players in the right order within a "

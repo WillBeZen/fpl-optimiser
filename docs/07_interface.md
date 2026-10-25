@@ -15,7 +15,7 @@ python scripts/run_week.py --open
 | 3 | the best squad from scratch (what a wildcard would build) |
 | 4 | **your transfer plan** with its chips, if `FPL_TEAM_ID` is set, plus the what-ifs (0..n transfers, more money, each chip in each gameweek) |
 | 5 | **Claude's news check** on the plan, if `ANTHROPIC_API_KEY` is set |
-| 6 | the walk-forward backtest of every model, then `reports/fpl_report.html` and the headline in the terminal |
+| 6 | the walk-forward backtest of every model; the accuracy check of the last 5 finished gameweeks (with the half-life check and its reconciliation, printed too); then `reports/fpl_report.html` and the headline in the terminal |
 
 A full run takes about 5–6 minutes (the backtest and the what-ifs are most of it; the
 plan with chips about a minute and a half).
@@ -82,7 +82,14 @@ model responds to the opponent; the minutes and points models and what they lean
 (permutation importance); the event model's formulas and average points by source; the
 blend and FPL's flags (who they cut); and the walk-forward backtest of every method.
 
-**6 · The planner** — the integer program in twelve stages, with your numbers: inputs
+**6 · Accuracy** — how predicted points lined up with what players scored over the last
+`ACCURACY_WINDOW_GW` finished gameweeks, for every player the planner considers (not
+dominated): the summary, gameweek by gameweek, every player's predicted and actual
+points each gameweek (shaded by over- or under-prediction), player totals, calibration,
+by position and by scoring source, the biggest misses, the half-life check and a
+reconciliation checklist. See `docs/08_accuracy.md`.
+
+**7 · The planner** — the integer program in twelve stages, with your numbers: inputs
 (bought for / now / sells for, bank, free transfers, dials); the candidate pool; the
 problem's variables, rules and objective, and its size, solve time and whether it was
 proven optimal; the no-transfer baseline; **how many transfers** (each extra move's
@@ -93,10 +100,10 @@ alternatives; what's binding (clubs at the limit, formation) and **what more mon
 buy**; the objective piece by piece; captain and bench each week; and the wildcard squad
 for comparison.
 
-**7 · Player analysis.** Player types per position, attacking threat, risers and
+**8 · Player analysis.** Player types per position, attacking threat, risers and
 fallers between seasons, value, and how this season links to last (Sections 1–2).
 
-**8 · Glossary.** About 60 terms in plain English, with a filter box. Each term has an
+**9 · Glossary.** About 75 terms in plain English, with a filter box. Each term has an
 anchor (`#g-<slug>`, e.g. `#g-hit-threshold`); numbers in the definitions are read from
 `config.py`, so they always match the settings the report was built with.
 
@@ -110,7 +117,7 @@ anchor (`#g-<slug>`, e.g. `#g-hit-threshold`); numbers in the definitions are re
 - `common.py`: `WeekResults` (what the run produced) and `Context` (the filed season),
   plus shared lookups.
 - `tab_week.py`, `tab_squad.py`, `tab_fixtures.py`, `tab_scout.py`, `tab_model.py`,
-  `tab_planner.py`: one `add(report, week, ctx)` each. Each tab skips what its inputs
+  `tab_accuracy.py`, `tab_planner.py`: one `add(report, week, ctx)` each. Each tab skips what its inputs
   don't support, so the page always builds.
 - `charts.py`: pure Plotly builders, light *and* dark, from a validated
   colour-blind-safe palette (three colours for scatters, four for stacked bars and
@@ -125,7 +132,7 @@ and links are `http(s)` only. DOM ids are unique (a duplicate breaks the page sc
 a test checks it).
 
 ## Tests
-`tests/test_report.py`: charts use their theme's palette; the page is self-contained;
+`tests/test_report.py` (the Accuracy tab's own tests: `tests/test_accuracy.py`): charts use their theme's palette; the page is self-contained;
 chart ids can't collide with section ids, and no DOM id is used twice; hostile names
 and advice stay escaped and `javascript:` links are dropped; every tab's sections
 appear with a plan and news check, and degrade gracefully without a team, the advisor

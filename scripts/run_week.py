@@ -31,10 +31,36 @@ from fpl_optimiser.app import report
 from fpl_optimiser.claude import advisor
 from fpl_optimiser.features import multi_season
 from fpl_optimiser.ingest import my_team, rules_check, season_store
-from fpl_optimiser.model import backtest, events, predict
-from fpl_optimiser.optimise import planner, squad, whatif
+from fpl_optimiser.model import accuracy, backtest, events, forecast_log, predict
+from fpl_optimiser.optimise import planner, pool, squad, whatif
 
 ADVICE_FILE = config.ROOT / "reports" / "last_advice.json"
+
+
+def _accuracy(fc, table, replay, events_data, mine, plan):
+    """The Accuracy tab's heavy parts (the half-life replays and the forecast-path
+    check), plus its headline and reconciliation in the terminal."""
+    season = season_store.load(fc.season)
+    rounds = [g for g in accuracy.window(season.gameweeks) if g in set(replay["round"])]
+    if not rounds:
+        return None, None
+    h = config.RECENCY_HALF_LIFE_GW
+    ids = pool.prune(fc.xp, fc.players, keep=mine.squad_ids if mine else [])
+    print(f"    accuracy: GW{rounds[0]}-{rounds[-1]} replayed at half-lives {h / 2:g}, {h:g}, {h * 2:g} ...")
+    half_lives = accuracy.half_life_check(fc.season, rounds, ids, (h / 2, h, h * 2), events_data, base_preds=replay)
+    path_check = accuracy.forecast_path_check(table, fc.season, rounds[-1], replay, fc.event_weight)
+    pg = accuracy.player_gameweeks(replay, rounds, ids)
+    s = accuracy.summary(pg)
+    print(f"    {len(ids)} players: predicted {s['predicted']:,.0f}, scored {s['actual']:,.0f} "
+          f"(bias {s['bias']:+.2f} a player-gameweek), typical miss {s['mae']:.2f}, "
+          f"rank correlation {s['rank_corr']:.2f}")
+    checks = accuracy.reconcile(pg, replay, rounds, season, ids, h, fc.event_weight,
+                                plan.stats.get("candidates") if plan is not None else None) + [path_check]
+    print(f"    reconciliation: {sum(c['ok'] is True for c in checks)} of {len(checks)} checks pass")
+    for c in checks:
+        if c["ok"] is not True:
+            print(f"      {'FAIL' if c['ok'] is False else 'info'}: {c['check']} - {c['detail']}")
+    return half_lives, path_check
 
 
 def main() -> int:
@@ -74,6 +100,8 @@ def main() -> int:
     players = fc.players
     nxt = fc.xp[fc.xp["gw"] == fc.next_gw]
     print(f"    GW{fc.next_gw}-{fc.gameweeks[-1]}, deadline {fc.deadline or '?'} UTC")
+    logged = forecast_log.save(fc)                 # kept for the Accuracy tab once GW is played
+    print(f"    GW{fc.next_gw} forecast logged ({logged.relative_to(config.ROOT)})")
 
     print("3/6 best squad from scratch ...")
     wildcard = squad.pick_squad(nxt)
@@ -132,15 +160,19 @@ def main() -> int:
         print(f"5/6 no new news check; reusing GW{fc.next_gw}'s from {advice.checked_at} UTC" if advice
               else "5/6 skipping the Claude news check")
 
-    bt = None
+    bt = replay = half_lives = path_check = None
     if not args.quick:
         print("    re-checking the models (walk-forward backtest) ...")
-        bt = backtest.summarise(backtest.walk_forward(table, fc.season, events_data=events.season_data(fc.season)))
+        events_data = events.season_data(fc.season)
+        replay = backtest.walk_forward(table, fc.season, events_data=events_data)
+        bt = backtest.summarise(replay)
+        half_lives, path_check = _accuracy(fc, table, replay, events_data, mine, plan)
 
     print("6/6 writing the report ...")
     week = report.WeekResults(forecast=fc, wildcard=wildcard, plan=plan, baseline=baseline,
                               team=mine, advice=advice, backtest=bt, table=table, ladder=ladder,
-                              budget=budget, chips=chip_grid)
+                              budget=budget, chips=chip_grid, replay=replay, half_lives=half_lives,
+                              forecast_check=path_check)
     out = report.build_report(fc.season, week=week).write()
 
     print()

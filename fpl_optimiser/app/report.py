@@ -4,7 +4,8 @@
 profiles -> player types), and, when the weekly run passes in its results
 (`WeekResults`), adds this week's tabs: This week, My squad, Fixtures, Scout, The
 model (the prediction engine stage by stage) and The planner (the integer program
-stage by stage). The analysis tab and a glossary of every term follow.
+stage by stage), Accuracy (predicted vs actual over the last gameweeks) and The
+planner. The analysis tab and a glossary of every term follow.
 
 Each tab lives in its own module (tab_week.py, tab_squad.py, ...); the building
 blocks (sections, tables, rendering, the page's script and styles) are in html.py.
@@ -19,8 +20,8 @@ from datetime import datetime
 import pandas as pd
 
 import config
-from fpl_optimiser.app import (charts, glossary, tab_fixtures, tab_model, tab_planner, tab_scout,
-                               tab_squad, tab_week)
+from fpl_optimiser.app import (charts, glossary, tab_accuracy, tab_fixtures, tab_model, tab_planner,
+                               tab_scout, tab_squad, tab_week)
 from fpl_optimiser.app.common import Context, WeekResults
 from fpl_optimiser.app.html import (Report, Section, card, data_table, esc, html_table, link, note,  # noqa: F401
                                     render, table)
@@ -77,6 +78,7 @@ def _add_week(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
     tab_fixtures.add(r, w, ctx)
     tab_scout.add(r, w, ctx)
     tab_model.add(r, w, ctx)
+    tab_accuracy.add(r, w, ctx)
     tab_planner.add(r, w, ctx)
 
 
