@@ -128,3 +128,17 @@ def test_an_empty_credit_balance_is_reported_in_plain_words():
         body={"type": "error", "error": {"type": "invalid_request_error", "message": msg}})
     a = advisor.advise("b", client=FakeClient(error=broke))
     assert not a.ok and a.error == f"Anthropic API error 400: {msg}"
+
+
+def test_a_successful_check_is_saved_and_reused_only_for_its_gameweek(tmp_path):
+    a = advisor.advise("brief", client=FakeClient(_response("tool_use", SUBMIT)))
+    assert a.checked_at                                       # stamped when it ran
+    a.gameweek = 9
+    path = tmp_path / "last_advice.json"
+    advisor.save(a, path)
+    again = advisor.load(path, 9)
+    assert again is not None and again.action_score == a.action_score and again.player_flags == a.player_flags
+    assert advisor.load(path, 10) is None                     # a new gameweek needs a new check
+    assert advisor.load(tmp_path / "missing.json", 9) is None
+    path.write_text("not json")
+    assert advisor.load(path, 9) is None

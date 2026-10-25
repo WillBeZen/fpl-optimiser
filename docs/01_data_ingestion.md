@@ -55,6 +55,11 @@ data/raw/fpl/<season>/bootstrap-static.json     players, teams, gameweeks (seaso
 - `season_store.load(season)` reads a filed season back as tidy tables (players,
   teams, fixtures, gameweeks, per-match history, `history_past`), and refuses a
   folder whose data belongs to a different season.
+- **Only finished matches count.** Once a gameweek starts, FPL lists every player's
+  match in it, including those not yet kicked off (0 minutes, 0 points) and those
+  still being played. `season_store.played_only` keeps a match record only once FPL
+  marks its fixture finished, so a mid-gameweek pull never counts unplayed games as
+  real ones (they used to drag form down and teach the models players didn't play).
 
 **What is filed today:** 2025/26 (frozen; full-season players, fixtures and results,
 but per-match history for only the top 50 players, because that is all that was
@@ -101,6 +106,11 @@ West Ham, Wolves.
 - **"Free transfers available this week" isn't in the API** — it's inferred from
   transfer history (Section 5). `my_squad()` returns picks, bank, value and the
   captain flags.
+- **Scouting fields** kept from the player feed: set-piece order (penalties, corners,
+  direct free kicks; 1 = first choice), this gameweek's transfers in/out, price changes,
+  FPL's own expected points (`ep_next`) and its price-change progress
+  (`price_change_percent`). They're parsed from the filed bootstrap, so no re-pull is
+  needed.
 
 ## Understat specifics (optional backend)
 - **One GET per league-season**, cached to `data/cache/understat/` for a day.
@@ -133,7 +143,8 @@ print(res.summary())                     # linked / by method / arrivals / depar
   results, the Understat embedded-JSON decode, season-code helpers, team-name
   reconciliation, and the FBref path with and without xG.
 - `tests/test_season_store.py` — the season is read from the data, pulls resume,
-  a frozen season is never overwritten, and a mislabelled folder is refused.
+  a frozen season is never overwritten, a mislabelled folder is refused, and only
+  finished matches count as played.
 - `tests/test_player_link.py` — each linking pass, accent handling (Ødegaard),
   ambiguous and contradictory candidates are never linked, club links, and the
   `history_past` check.

@@ -69,7 +69,8 @@ def test_build_report_from_a_filed_store(two_seasons):
     assert r.sections[-1].id == "glossary"                  # the glossary closes the page
     assert "arrivals" in r.figures
     page = report.render(r)
-    assert '<a href="#glossary">Glossary</a>' in page and 'id="gloss-filter"' in page
+    assert '<a href="#tab-glossary" data-tab="glossary" role="tab">Glossary</a>' in page
+    assert 'id="gloss-filter"' in page and 'id="tab-analysis"' in page
 
 
 def test_glossary_terms_are_unique_and_quote_the_live_settings(monkeypatch):
@@ -135,7 +136,15 @@ def test_week_sections_with_a_plan_and_a_news_check():
                     sources=[{"title": "A", "url": "https://example.com/a"}],
                     input_tokens=12_000, output_tokens=3_000)
     r, page = _render(_week(advice=advice))
-    assert [s.id for s in r.sections] == ["week", "advice", "wildcard", "predictions"]
+    tabs = {}
+    for s in r.sections:
+        tabs.setdefault(s.tab, []).append(s.id)
+    assert tabs["week"] == ["week", "alerts", "advice", "captain"]
+    assert {"squad-grid"} <= set(tabs["squad"]) and {"captaincy", "market", "targets"} <= set(tabs["scout"])
+    assert tabs["model"][0] == "m-data" and tabs["model"][-1] == "backtest"
+    assert tabs["planner"] == ["p-inputs", "p-pool", "p-problem", "p-baseline", "p-ladder", "p-plan",
+                               "p-why", "p-limits", "p-objective", "p-captain", "wildcard"]
+    assert len({s.id for s in r.sections}) == len(r.sections)          # ids are unique
     labels = {label: value for label, value, _ in r.tiles}
     assert labels["Next deadline"] == "GW9" and labels["News check"] == "82/100"
     assert "Plan vs no transfers" in labels and {"plan", "xp-next"} <= set(r.figures)
@@ -159,4 +168,43 @@ def test_backtest_section_when_given():
                        "rank_corr": [0.6, 0.6], "top11_points": [49.6, 38.9],
                        "gameweeks": [7, 7], "predictions": [100, 100]})
     r, _ = _render(_week(backtest=bt))
-    assert r.sections[-1].id == "backtest" and "backtest" in r.figures
+    assert next(s for s in r.sections if s.id == "backtest").tab == "model" and "backtest" in r.figures
+
+
+def test_the_full_dashboard_from_a_filed_store(two_seasons):
+    """Forecast, events and backtest from a filed store: every tab builds and renders."""
+    from fpl_optimiser.features import multi_season
+    from fpl_optimiser.model import backtest, events, predict
+
+    fc = predict.forecast(horizon=3)
+    table = multi_season.build_all()
+    bt = backtest.summarise(backtest.walk_forward(table, fc.season, events_data=events.season_data(fc.season)))
+    wc = squad.pick_squad(_candidates())                       # ids from elsewhere: skipped, not a crash
+    week = report.WeekResults(fc, wc, backtest=bt, table=table)
+    r = report.build_report(week=week)
+    ids = {s.id for s in r.sections}
+    assert {"ratings", "ticker-attack", "ticker-defence", "styles"} <= ids          # fixtures tab
+    assert {"m-recency", "m-matchups", "m-events", "m-blend", "backtest"} <= ids    # model tab
+    assert {"explorer", "market", "glossary", "link"} <= ids
+    assert {"ratings", "m-weights", "m-prior-share", "m-response"} <= set(r.figures)
+    assert "Blend (what the planner uses)" in set(bt["method"])
+    page = report.render(r)
+    for tab in ("week", "squad", "fixtures", "scout", "model", "planner", "analysis", "glossary"):
+        assert f'id="tab-{tab}"' in page
+    assert page.count('class="explore"') >= 2 and 'data-explorer="explorer-panels"' in page
+    import re
+    ids = re.findall(r'\sid="([^"]+)"', page.split('<script type="application/json"')[0])
+    assert len(ids) == len(set(ids)), "duplicate DOM ids break the page's script"
+
+
+def test_data_table_cells_sort_shade_and_escape():
+    from fpl_optimiser.app import html
+    df = pd.DataFrame({"Player": [HOSTILE, "B"], "Pts": [7.25, 1.0], "GW9": [(6.0, "6.0<small>ARS</small>"), (0.5, "x")],
+                       "_id": [1, 2]})
+    out = html.data_table(df, fmt={"Pts": "{:.1f}"}, heat={"GW9": (0, 7)}, html_cols=("GW9",), hidden=("_id",),
+                          row_attrs=lambda r: {"pos": "MID", **({"class": "mine"} if r["_id"] == 1 else {})})
+    assert HOSTILE not in out and "&lt;img" in out
+    assert '<td data-v="7.25">7.2</td>' in out or '<td data-v="7.25">7.3</td>' in out
+    assert '<td data-v="6" class="h6">6.0<small>ARS</small></td>' in out
+    assert '<tr data-pos="MID" class="mine">' in out and "_id" not in out
+    assert html.heat_class(0, 0, 7) == "h0" and html.heat_class(99, 0, 7) == "h6" and html.heat_class(None, 0, 1) == ""

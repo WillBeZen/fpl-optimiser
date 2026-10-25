@@ -13,7 +13,7 @@ for week in plan.weeks:
 
 ## One program over the whole horizon
 The single-gameweek rules (Section 4) apply to every gameweek in the horizon
-(`config.PLANNING_HORIZON_GW`, 5), linked week to week:
+(`config.PLANNING_HORIZON_GW`), linked week to week:
 
 - **squad continuity:** this week's squad = last week's + bought − sold;
 - **money:** bank = last week's bank + sales − purchases, never below zero. Your own
@@ -39,6 +39,30 @@ next week, or that a hit pays back over five weeks.
 `max_transfers_per_gw=0` gives the **"do nothing" baseline** (best XI and captain each
 week, no transfers), which is what a plan's gain is measured against.
 
+## Faster: the candidate pool (`optimise/pool.py`)
+Most of the ~700 players can never be in an optimal squad: at least `quota + 5`
+others at their position cost no more and score at least as much in every gameweek of
+the horizon. They're dropped before solving (your own players are always kept): 669
+→ ~240 players and the same plan, about 2.5× faster. `Plan.stats` records the problem
+size and solve time. Free transfers carried each week (`Week.free_after`) are exact (a
+tiny tie-break stops the solver under-reporting them when it doesn't matter to it).
+
+## What-ifs (`optimise/whatif.py`)
+Each re-solves the same program with one thing changed (in parallel threads; CBC runs
+as its own process):
+
+- `transfer_ladder`: the best plan with exactly 0, 1, 2, ... transfers this week (up
+  to one hit), and what each extra move adds to the objective;
+- `budget_value`: the plan with £0.5m / £1m / £2m more in the bank;
+- `alternatives`: for each move, the next-best players who could have come in
+  (same position, affordable with that slot's money, club limit kept);
+- `transfer_reasons`: each move out vs in, gameweek by gameweek, with the money freed;
+- `constraint_use`: clubs at the 3-player limit, money left, formation;
+- `objective_parts`: the solver's objective split into each week's XI, captain and
+  bench (decayed), the hit penalty and banked transfers.
+
+`run_week.py` runs the ladder and budget what-ifs by default (`--quick` skips them).
+
 ## What isn't planned yet
 Chips (wildcard, free hit, bench boost, triple captain). Prices are assumed not to
 change during the horizon. Your squad, free transfers and selling prices come from FPL's public
@@ -48,4 +72,8 @@ data (`ingest/my_team.py`); `run_week.py --free-transfers N` overrides the estim
 `tests/test_optimise.py`: selling prices follow FPL's rule; with transfers disabled the
 squad never changes and free transfers roll over (1 → 2 → 3); an injured star is
 replaced using the free transfer, without a hit; and, in a controlled market, a −4 is
-taken when it gains 8 points but not when it gains 5 (threshold 6).
+taken when it gains 8 points but not when it gains 5 (threshold 6). Pruning: a dear,
+pointless player is dropped unless owned, and the pruned and full solves give the same
+plan; free transfers carried week to week follow the rules; the ladder's best rung is
+the plan and replacing an injured starter pays; more budget never hurts; alternatives
+are same-position, affordable and outside the squad; objective parts add up.

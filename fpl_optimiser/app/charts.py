@@ -22,12 +22,20 @@ THEMES = {
     "light": {"surface": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "muted": "#898781",
               "grid": "#e1e0d9", "axis": "#c3c2b7",
               "series": ["#2a78d6", "#eb6834", "#1baf7a"],
+              "stack": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"],
+              "seq": ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"],
               "low": "#2a78d6", "mid": "#f0efec", "high": "#e34948"},
     "dark": {"surface": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "muted": "#898781",
              "grid": "#2c2c2a", "axis": "#383835",
              "series": ["#3987e5", "#d95926", "#199e70"],
+             "stack": ["#3987e5", "#d95926", "#199e70", "#c98500"],
+             "seq": ["#0d366b", "#104281", "#184f95", "#1c5cab", "#3987e5", "#6da7ec", "#9ec5f4"],
              "low": "#3987e5", "mid": "#383835", "high": "#e66767"},
 }
+
+# Up to four series that sit side by side (stacked bars, a few lines) use "stack":
+# the palette's first four slots, which pass the colour-blind checks for adjacent
+# pairs. Heatmaps use "seq": one blue ramp, light -> dark (dark mode: dark -> light).
 
 # The two stats each position's player-type map is drawn on (all types are
 # clustered on more — the fingerprint beside each map shows the full picture).
@@ -122,14 +130,16 @@ def type_fingerprint(types: pd.DataFrame, position: str, theme: str = "light") -
         colorbar=dict(title=dict(text="SD vs avg", font=dict(color=t["ink2"], size=12)),
                       tickfont=dict(color=t["muted"], size=11), outlinewidth=0, thickness=10),
         hovertemplate="<b>%{z:+.2f} SD</b> vs the position average<br>%{x} · %{y}<extra></extra>"))
+    notes = []
     for i, row in enumerate(rows):
         for j, col in enumerate(cols):
             v = round(float(z[i, j]), 1)
             end = t["high"] if v > 0 else t["low"]
             fill = _blend(t["mid"], end, min(abs(v) / lim, 1))
-            fig.add_annotation(x=col, y=row, text=f"{v:+.1f}" if v else "0.0", showarrow=False,
-                               font=dict(color=_ink_on(fill, t), size=12))
+            notes.append(dict(x=col, y=row, text=f"{v:+.1f}" if v else "0.0", showarrow=False,
+                              font=dict(color=_ink_on(fill, t), size=12)))
     layout = _layout(t, "What sets each type apart (per 90, vs the position average)", height=320)
+    layout["annotations"] = notes
     layout["yaxis"].update(autorange="reversed", showgrid=False, tickfont=dict(color=t["ink2"], size=12))
     layout["xaxis"].update(showgrid=False, title_text="", tickangle=0,
                            tickfont=dict(color=t["ink2"], size=12))
@@ -270,4 +280,226 @@ def plan_vs_baseline(gws: list[int], plan_xp: list[float], base_xp: list[float],
     layout["xaxis"].update(showgrid=False)
     layout.update(barmode="group", bargap=0.35, bargroupgap=0.12)
     fig.update_layout(**layout)
+    return fig
+
+
+# --------------------------------------------------------------------------- #
+# The model and planner walk-throughs, fixtures and the squad
+# --------------------------------------------------------------------------- #
+def _hbars_layout(t: dict, title: str, x_title: str, n: int) -> dict:
+    layout = _layout(t, title, x_title, height=150 + 28 * n)
+    layout["yaxis"].update(showgrid=False, tickfont=dict(color=t["ink2"], size=12), automargin=True)
+    layout["margin"].update(r=56)
+    layout["bargap"] = 0.35
+    return layout
+
+
+def weight_bars(curve: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """How much each past gameweek (and last season, as one block) counts in the form
+    used to predict the next gameweek. Two series: last season, this season."""
+    t = THEMES[theme]
+    last, this = curve[curve["round"] == 0], curve[curve["round"] > 0]
+    fig = go.Figure([
+        go.Bar(x=last["label"], y=last["share"] * 100, name="Last season (all 38 matches together)",
+               marker=dict(color=t["series"][1], cornerradius=4),
+               text=[f"{v:.0%}" for v in last["share"]], textposition="outside",
+               textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+               hovertemplate="%{x}: %{y:.1f}% of the form<extra></extra>"),
+        go.Bar(x=this["label"], y=this["share"] * 100, name="This season, match by match",
+               marker=dict(color=t["series"][0], cornerradius=4),
+               text=[f"{v:.0%}" for v in this["share"]], textposition="outside",
+               textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+               customdata=this[["gameweeks_ago", "weight"]].to_numpy(),
+               hovertemplate="%{x} (%{customdata[0]:.0f} gameweeks ago): weight %{customdata[1]:.2f}, "
+                             "%{y:.1f}% of the form<extra></extra>"),
+    ])
+    layout = _layout(t, "How much each match counts towards form", "", "Share of the form (%)",
+                     height=380, legend_rows=2)
+    layout["xaxis"].update(showgrid=False)
+    layout.update(bargap=0.3)
+    fig.update_layout(**layout)
+    return fig
+
+
+def share_line(share: pd.DataFrame, current_gw: int, theme: str = "light") -> go.Figure:
+    """Last season's share of a regular's form, gameweek by gameweek (single series)."""
+    t = THEMES[theme]
+    now = share[share["gw"] == current_gw]
+    fig = go.Figure([
+        go.Scatter(x=share["gw"], y=share["share"] * 100, mode="lines", name="Last season's share",
+                   line=dict(color=t["series"][1], width=2),
+                   hovertemplate="GW%{x}: last season is %{y:.0f}% of form<extra></extra>"),
+        go.Scatter(x=now["gw"], y=now["share"] * 100, mode="markers+text", name="Now",
+                   marker=dict(size=10, color=t["series"][1], line=dict(width=2, color=t["surface"])),
+                   text=[f"GW{current_gw}: {v:.0%}" for v in now["share"]], textposition="top right",
+                   textfont=dict(color=t["ink2"], size=12), hoverinfo="skip", showlegend=False),
+    ])
+    layout = _layout(t, "Last season fades as this season's matches arrive", "Gameweek",
+                     "Last season's share of form (%)", height=340)
+    layout["yaxis"].update(range=[0, 105])
+    layout["showlegend"] = False
+    fig.update_layout(**layout)
+    return fig
+
+
+def importance_bars(fi: pd.DataFrame, col: str, title: str, x_title: str, theme: str = "light",
+                    n: int = 12) -> go.Figure:
+    """The inputs a model leans on most (permutation importance), single series."""
+    t = THEMES[theme]
+    top = fi.nlargest(n, col).iloc[::-1]
+    fig = go.Figure(go.Bar(
+        x=top[col], y=top["label"], orientation="h", marker=dict(color=t["series"][0], cornerradius=4),
+        text=[f"{v:.3f}" for v in top[col]], textposition="outside",
+        textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+        hovertemplate="<b>%{y}</b>: shuffling it makes the model worse by %{x:.4f}<extra></extra>"))
+    fig.update_layout(**_hbars_layout(t, title, x_title, len(top)))
+    return fig
+
+
+def response_lines(resp: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """The points model's points-if-he-plays against the opponent's goals conceded per
+    game, one line per position (direct labels at the line ends)."""
+    t = THEMES[theme]
+    fig = go.Figure()
+    for k, pos in enumerate(["GK", "DEF", "MID", "FWD"]):
+        d = resp[resp["position"] == pos].sort_values("opp_gc_pg")
+        if d.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=d["opp_gc_pg"], y=d["pts_if_play"], mode="lines+markers", name=POSITION_NAMES[pos],
+            line=dict(color=t["stack"][k], width=2), marker=dict(size=8, line=dict(width=2, color=t["surface"])),
+            hovertemplate=f"{POSITION_NAMES[pos]}: %{{y:.2f}} pts if he plays, vs a defence conceding "
+                          "%{x:.1f} a game<extra></extra>"))
+        end = d.iloc[-1]
+        fig.add_annotation(x=end["opp_gc_pg"], y=end["pts_if_play"], text=POSITION_NAMES[pos],
+                           showarrow=False, xanchor="left", xshift=8, font=dict(color=t["ink2"], size=11))
+    layout = _layout(t, "Points model: points if he plays vs the opponent's defence",
+                     "Opponent's goals conceded a game", "Points if he plays (average)",
+                     height=400, legend_rows=4)
+    layout["margin"].update(r=110)
+    fig.update_layout(**layout)
+    return fig
+
+
+def ratings_scatter(teams: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """Each club's attack (xG created per game) vs defence (xG conceded per game,
+    better at the top), labelled with its short name."""
+    t = THEMES[theme]
+    fig = go.Figure(go.Scatter(
+        x=teams["attack"], y=teams["defence"], mode="markers+text", text=teams["short_name"],
+        textposition="top center", textfont=dict(color=t["ink2"], size=11),
+        marker=dict(size=11, color=t["series"][0], line=dict(width=2, color=t["surface"])),
+        customdata=teams[["name", "att_index", "def_index", "prior_share"]].to_numpy(),
+        hovertemplate=("<b>%{customdata[0]}</b><br>Attack %{x:.2f} xG a game (%{customdata[1]:.2f}x average)"
+                       "<br>Defence %{y:.2f} xG conceded a game (%{customdata[2]:.2f}x average)"
+                       "<br>Last season still %{customdata[3]:.0%} of the rating<extra></extra>")))
+    mean = float(np.mean(np.concatenate([teams["attack"], teams["defence"]])))
+    fig.add_vline(x=mean, line=dict(color=t["axis"], width=1, dash="dot"))
+    fig.add_hline(y=mean, line=dict(color=t["axis"], width=1, dash="dot"))
+    layout = _layout(t, "Team ratings: attack vs defence (top right = strong at both)",
+                     "Attack: xG created per game", "Defence: xG conceded per game (lower is better)", height=520)
+    layout["yaxis"].update(autorange="reversed")
+    layout["showlegend"] = False
+    fig.update_layout(**layout)
+    return fig
+
+
+def ladder_bars(ladder: pd.DataFrame, chosen: int, theme: str = "light") -> go.Figure:
+    """What each extra transfer this gameweek adds to the planner's objective. Moves
+    up to the chosen number in the accent colour; beyond it, grey."""
+    t = THEMES[theme]
+    d = ladder.dropna(subset=["gain"])
+    labels = [f"{k} transfer{'s' if k > 1 else ''}" + (f" ({h} hit)" if h else "")
+              for k, h in zip(d["transfers"], d["hits"])]
+    colours = [t["series"][0] if k <= chosen else t["muted"] for k in d["transfers"]]
+    fig = go.Figure(go.Bar(
+        x=labels, y=d["gain"], marker=dict(color=colours, cornerradius=4),
+        text=[f"{v:+.1f}" for v in d["gain"]], textposition="outside",
+        textfont=dict(color=t["ink2"], size=12), cliponaxis=False,
+        customdata=d[["in", "out"]].to_numpy(),
+        hovertemplate="<b>%{x}</b>: %{y:+.2f} vs one fewer<br>Out: %{customdata[1]}<br>In: %{customdata[0]}<extra></extra>"))
+    fig.add_hline(y=0, line=dict(color=t["axis"], width=1))
+    layout = _layout(t, "What each extra transfer this week is worth", "",
+                     "Gain in the planner's objective (points)", height=380)
+    layout["xaxis"].update(showgrid=False)
+    layout["showlegend"] = False
+    fig.update_layout(**layout)
+    return fig
+
+
+def budget_bars(budget: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """How much the plan improves with more money in the bank (single series)."""
+    t = THEMES[theme]
+    d = budget[budget["extra"] > 0]
+    fig = go.Figure(go.Bar(
+        x=[f"+£{e:g}m" for e in d["extra"]], y=d["gain"], marker=dict(color=t["series"][0], cornerradius=4),
+        text=[f"{v:+.1f}" for v in d["gain"]], textposition="outside",
+        textfont=dict(color=t["ink2"], size=12), cliponaxis=False, customdata=d[["in"]].to_numpy(),
+        hovertemplate="<b>%{x}</b>: %{y:+.2f}<br>Would buy: %{customdata[0]}<extra></extra>"))
+    layout = _layout(t, "What more money would be worth", "", "Gain in the planner's objective (points)",
+                     height=320)
+    layout["xaxis"].update(showgrid=False)
+    layout["showlegend"] = False
+    fig.update_layout(**layout)
+    return fig
+
+
+SOURCE_GROUPS = {"Appearance": ["Appearance"], "Attack": ["Goals", "Assists"],
+                 "Defence": ["Clean sheet", "Conceded", "Saves", "Def. contributions"],
+                 "Bonus and cards": ["Bonus", "Cards"]}
+
+
+def sources_bars(df: pd.DataFrame, theme: str = "light") -> go.Figure:
+    """Where each player's expected points come from (event model), stacked in four
+    groups. df: one row per player with `label` and the events.SOURCES columns."""
+    t = THEMES[theme]
+    d = df.iloc[::-1]
+    fig = go.Figure()
+    for k, (group, cols) in enumerate(SOURCE_GROUPS.items()):
+        v = d[cols].sum(axis=1)
+        fig.add_trace(go.Bar(
+            x=v, y=d["label"], orientation="h", name=group,
+            marker=dict(color=t["stack"][k], line=dict(width=2, color=t["surface"])),
+            hovertemplate=f"<b>%{{y}}</b><br>{group}: %{{x:.2f}} pts<extra></extra>"))
+    layout = _hbars_layout(t, "Where the expected points come from (event model)", "Expected points", len(d))
+    layout["height"] += 22 * 4
+    layout["margin"].update(t=52 + 22 * 4)
+    layout["barmode"] = "relative"
+    fig.update_layout(**layout)
+    return fig
+
+
+def heatmap(z: pd.DataFrame, title: str, theme: str = "light", fmt: str = "{:.1f}",
+            colorbar: str = "", height: int | None = None) -> go.Figure:
+    """A sequential heatmap (one blue ramp) with each cell's value written in it."""
+    t = THEMES[theme]
+    vals = z.to_numpy(dtype=float)
+    lo, hi = float(np.nanmin(vals)), float(np.nanmax(vals))
+    hi = hi if hi > lo else lo + 1
+    scale = [[i / (len(t["seq"]) - 1), c] for i, c in enumerate(t["seq"])]
+    rows, cols = [str(r) for r in z.index], [str(c) for c in z.columns]
+    fig = go.Figure(go.Heatmap(
+        z=vals, x=cols, y=rows, zmin=lo, zmax=hi, colorscale=scale, xgap=2, ygap=2,
+        colorbar=dict(title=dict(text=colorbar, font=dict(color=t["ink2"], size=12)),
+                      tickfont=dict(color=t["muted"], size=11), outlinewidth=0, thickness=10),
+        hovertemplate="%{y} · %{x}: %{z:.2f}<extra></extra>"))
+    # every cell's label in one list: add_annotation one at a time re-validates all the
+    # earlier ones, which is quadratic (minutes for a 15 x 20 grid)
+    notes = []
+    for i, r in enumerate(rows):
+        for j, c in enumerate(cols):
+            v = vals[i, j]
+            if np.isnan(v):
+                continue
+            step = int(np.clip((v - lo) / (hi - lo) * (len(t["seq"]) - 1), 0, len(t["seq"]) - 1))
+            notes.append(dict(x=c, y=r, text=fmt.format(v), showarrow=False,
+                              font=dict(color=_ink_on(t["seq"][step], t), size=11)))
+    layout = _layout(t, title, height=height or (120 + 34 * len(rows)))
+    layout["annotations"] = notes
+    layout["yaxis"].update(autorange="reversed", showgrid=False, tickfont=dict(color=t["ink2"], size=12))
+    layout["xaxis"].update(showgrid=False, side="top", tickfont=dict(color=t["ink2"], size=11), tickangle=0)
+    layout["margin"].update(l=10, t=90, b=16)
+    layout["hovermode"] = "closest"
+    fig.update_layout(**layout)
+    fig.update_yaxes(automargin=True)
     return fig

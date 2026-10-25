@@ -125,6 +125,8 @@ class Advice:
     error: str = ""                                     # set when no advice could be produced
     input_tokens: int = 0                               # across every request this run made
     output_tokens: int = 0
+    checked_at: str = ""                                # when the check ran, "YYYY-MM-DD HH:MM" UTC
+    gameweek: int | None = None                         # the gameweek it was about
 
     @property
     def ok(self) -> bool:
@@ -249,7 +251,8 @@ def advise(user_brief: str, client=None, model: str = config.ADVISOR_MODEL,
                           summary=a["summary"], captain_ok=a["captain_ok"], captain_note=a["captain_note"],
                           player_flags=a["player_flags"], adjustments=a["adjustments"], risks=a["risks"],
                           model=getattr(response, "model", model), searches=searches, sources=sources,
-                          input_tokens=tokens_in, output_tokens=tokens_out)
+                          input_tokens=tokens_in, output_tokens=tokens_out,
+                          checked_at=f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M}")
         if response.stop_reason == "pause_turn":           # a long search turn paused: resume it
             messages = [messages[0], {"role": "assistant", "content": response.content}]
             continue
@@ -260,3 +263,32 @@ def advise(user_brief: str, client=None, model: str = config.ADVISOR_MODEL,
             continue
         return unavailable(f"no advice returned (stop reason: {response.stop_reason})")
     return unavailable("the news search didn't finish")
+
+
+# --------------------------------------------------------------------------- #
+# Keeping the last check (so a re-run needn't pay for another)
+# --------------------------------------------------------------------------- #
+def save(advice: Advice, path) -> None:
+    """Write a successful check to `path` (JSON) for reuse later in the same gameweek."""
+    import json
+    from dataclasses import asdict
+    from pathlib import Path
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(asdict(advice), indent=1), encoding="utf-8")
+
+
+def load(path, gameweek: int) -> Advice | None:
+    """The saved check for `gameweek`, or None (missing, unreadable or another week)."""
+    import json
+    from dataclasses import fields
+    from pathlib import Path
+
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("gameweek") != gameweek or data.get("error"):
+        return None
+    known = {f.name for f in fields(Advice)}
+    return Advice(**{k: v for k, v in data.items() if k in known})

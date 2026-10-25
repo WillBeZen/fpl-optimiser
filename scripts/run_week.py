@@ -7,9 +7,10 @@ run_week.py — the weekly run, in one command:
     python scripts/run_week.py --no-pull          # skip refreshing FPL data
     python scripts/run_week.py --team-id 1234567  # or put FPL_TEAM_ID=1234567 in .env
     python scripts/run_week.py --free-transfers 2 # override the estimate from your history
-    python scripts/run_week.py --no-advisor       # skip the Claude news check
+    python scripts/run_week.py --no-advisor       # no new Claude news check (reuses this
+                                                  # gameweek's last one, if saved)
     python scripts/run_week.py --advisor-effort low --max-searches 2   # a cheaper news check
-    python scripts/run_week.py --backtest         # also re-check the model (~1 minute)
+    python scripts/run_week.py --quick            # skip the backtest and the planner's what-ifs
 
 Your team id is the number in your team's URL on the FPL site
 (fantasy.premierleague.com/entry/<id>/event/<gw>). The news check needs
@@ -30,8 +31,10 @@ from fpl_optimiser.app import report
 from fpl_optimiser.claude import advisor
 from fpl_optimiser.features import multi_season
 from fpl_optimiser.ingest import my_team, rules_check, season_store
-from fpl_optimiser.model import backtest, predict
-from fpl_optimiser.optimise import planner, squad
+from fpl_optimiser.model import backtest, events, predict
+from fpl_optimiser.optimise import planner, squad, whatif
+
+ADVICE_FILE = config.ROOT / "reports" / "last_advice.json"
 
 
 def main() -> int:
@@ -45,7 +48,9 @@ def main() -> int:
                     default=config.ADVISOR_EFFORT, help="how hard Claude thinks (lower = cheaper)")
     ap.add_argument("--max-searches", type=int, default=config.ADVISOR_MAX_SEARCHES,
                     help="most web searches Claude may run ($0.01 each)")
-    ap.add_argument("--backtest", action="store_true", help="also re-run the model backtest")
+    ap.add_argument("--quick", action="store_true",
+                    help="skip the backtest and the planner's what-ifs (about 2 minutes faster)")
+    ap.add_argument("--backtest", action="store_true", help=argparse.SUPPRESS)   # now the default
     ap.add_argument("--open", action="store_true", help="open the report when done")
     args = ap.parse_args()
 
@@ -74,7 +79,7 @@ def main() -> int:
     wildcard = squad.pick_squad(nxt)
 
     team_id = args.team_id or (int(os.environ["FPL_TEAM_ID"]) if os.environ.get("FPL_TEAM_ID", "").strip().isdigit() else None)
-    plan = baseline = mine = None
+    plan = baseline = mine = ladder = budget = None
     if team_id:
         print(f"4/6 planning transfers for team {team_id} ...")
         mine = my_team.load(team_id, season_store.load(fc.season).bootstrap, fc.next_gw)
@@ -83,6 +88,14 @@ def main() -> int:
         plan = planner.plan(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers, mine.sell_prices)
         baseline = planner.plan(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers,
                                 mine.sell_prices, max_transfers_per_gw=0)
+        print(f"    solved in {plan.stats['solve_seconds']:.0f}s ({plan.stats['candidates']} of "
+              f"{plan.stats['players']} players considered)")
+        if not args.quick:
+            print("    what-ifs: 0..n transfers this week, and more money ...")
+            inputs = whatif.plan_inputs(fc.xp, players, mine.squad_ids, mine.bank, mine.free_transfers,
+                                        mine.sell_prices)
+            ladder = whatif.transfer_ladder(inputs)
+            budget = whatif.budget_value(inputs, base=plan)
     else:
         print("4/6 no FPL_TEAM_ID set: skipping your transfer plan (best squad from scratch only)")
 
@@ -99,23 +112,28 @@ def main() -> int:
                                 xp=wildcard.xp, formation=wildcard.formation)
             text = advisor.brief(week, players, fc.deadline, from_scratch=True)
         advice = advisor.advise(text, effort=args.advisor_effort, max_searches=args.max_searches)
+        advice.gameweek = fc.next_gw
         if advice.ok:
+            advisor.save(advice, ADVICE_FILE)
             cost = f", about ${advice.cost:.2f}" if advice.cost is not None else ""
             print(f"    {advice.action_score}/100, {advice.verdict} ({advice.searches} searches, "
                   f"{advice.input_tokens:,} tokens in, {advice.output_tokens:,} out{cost})")
         else:
             print(f"    unavailable: {advice.error}")
     else:
-        print("5/6 skipping the Claude news check")
+        advice = advisor.load(ADVICE_FILE, fc.next_gw)
+        print(f"5/6 no new news check; reusing GW{fc.next_gw}'s from {advice.checked_at} UTC" if advice
+              else "5/6 skipping the Claude news check")
 
     bt = None
-    if args.backtest:
-        print("    re-checking the model (walk-forward backtest) ...")
-        bt = backtest.summarise(backtest.walk_forward(table, fc.season))
+    if not args.quick:
+        print("    re-checking the models (walk-forward backtest) ...")
+        bt = backtest.summarise(backtest.walk_forward(table, fc.season, events_data=events.season_data(fc.season)))
 
     print("6/6 writing the report ...")
     week = report.WeekResults(forecast=fc, wildcard=wildcard, plan=plan, baseline=baseline,
-                              team=mine, advice=advice, backtest=bt)
+                              team=mine, advice=advice, backtest=bt, table=table, ladder=ladder,
+                              budget=budget)
     out = report.build_report(fc.season, week=week).write()
 
     print()

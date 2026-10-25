@@ -10,7 +10,9 @@ A two-engine Fantasy Premier League decision system:
 
 A **Claude advisor** then checks the plan against live football news and returns a
 0–100 "how strongly to act" score. Everything lands in one self-contained **HTML
-report** you open locally.
+dashboard** you open locally: this week's plan, what each of your players should do in
+each fixture, fixture tickers, a scout's view of the whole market, and every stage of
+the model and the optimiser, explained with your numbers.
 
 Full plan and rationale: [`docs/00_charter.md`](docs/00_charter.md).
 
@@ -43,17 +45,19 @@ scratch, just no personal transfer plan or news check.
 python scripts/run_week.py --open
 ```
 
-That one command refreshes FPL's data, predicts the next five gameweeks, plans your
+That one command refreshes FPL's data, predicts the next gameweeks, plans your
 transfers (bank, spend, or take a −4 only if it clearly pays), asks Claude to check
-the news, and opens the report. `python scripts/run_week.py --help` lists the
-options (e.g. `--free-transfers 2` if the estimate is off, `--backtest` to re-check
-the model, `--advisor-effort low --max-searches 2` for a cheaper news check). The
-report ends with a glossary of every term it uses.
+the news, re-checks the models against the season so far, and opens the dashboard
+(about 3–4 minutes). `python scripts/run_week.py --help` lists the
+options (e.g. `--free-transfers 2` if the estimate is off,
+`--advisor-effort low --max-searches 2` for a cheaper news check, `--quick` to skip the
+backtest and what-ifs, `--no-advisor` to reuse this gameweek's last news check instead
+of paying for a new one). The dashboard ends with a glossary of every term it uses.
 
 ## Check it works
 
 ```bash
-python -m pytest -q                # 91 offline tests, ~20 seconds
+python -m pytest -q                # 114 offline tests, ~40 seconds
 python config.py                   # prints "config OK"
 python scripts/check_claude.py     # one tiny Claude request: is your key working?
 ```
@@ -67,10 +71,11 @@ fpl_optimiser/
                            your team, rules check, opponent stats
   features/                Section 2 — recency, opponent archetypes, training table,
                            last-season prior, multi-season table, player types
-  model/                   Section 3 — minutes + points models, backtest, forecasts
-  optimise/                Sections 4–5 — squad MILP + multi-week transfer planner
+  model/                   Section 3 — minutes + points models, event model, backtest,
+                           forecasts, explainers
+  optimise/                Sections 4–5 — squad MILP, multi-week planner, pool, what-ifs
   claude/                  Section 6 — the Claude news check
-  app/                     Section 7 — charts + the HTML report
+  app/                     Section 7 — charts + the tabbed HTML dashboard
 scripts/                   run_week (weekly), pull_fpl, build_features, make_report, verify_setup
 docs/                      one plain-English write-up per section
 tests/                     offline: mock payloads and tiny synthetic seasons, never the network

@@ -14,7 +14,8 @@ A weekly Fantasy Premier League decision system with **two separable engines**:
    rules, across a **multi-week** horizon.
 
 A Claude advisor then interprets the optimiser's output against live football news
-and returns a recommendation with a 0–100 "how strongly to act" score.
+and returns a recommendation with a 0–100 "how strongly to act" score. Everything lands
+in a tabbed, self-contained HTML dashboard that shows each stage of both engines.
 
 Full plan and rationale: `docs/00_charter.md`. One plain-English doc per section
 lives in `docs/` — **update the matching doc whenever you change a section.**
@@ -24,8 +25,9 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (91 tests today)
+python -m pytest -q                            # MUST stay green (114 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
+python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
 python scripts/build_features.py               # just the multi-season training table -> data/processed/
 python scripts/make_report.py --open           # just the analysis report
@@ -45,6 +47,7 @@ fpl_optimiser/
   ingest/
     fpl_api.py                FPL API client (fetch + PURE parse_* fns)          [done]
     season_store.py           files each season in data/raw/fpl/<season>/; freeze [done]
+                              (played_only: only FINISHED matches count as played)
     player_link.py            same player across seasons: code -> name+dob -> dob+region+surname [done]
     opponent_stats.py         source-agnostic opponent table + auto-fallback     [done]
     fbref.py                  FBref via soccerdata (needs Chrome) — a backend     [done]
@@ -63,15 +66,23 @@ fpl_optimiser/
     inputs.py                 the feature list both models use                   [done]
     minutes.py                P(plays), P(60+)                                   [done]
     points.py                 xp = p_play x points-if-he-plays                   [done]
-    backtest.py               walk-forward backtest vs form / season average     [done]
-    predict.py                forecast(): xp for the next N gameweeks            [done]
+    events.py                 event model: team ratings -> fixture goals -> player events [done]
+    backtest.py               walk-forward backtest: blend, points, events, baselines [done]
+    predict.py                forecast(): blended xp for the next N gameweeks    [done]
+    explain.py                numbers behind the report's "The model" tab        [done]
   optimise/
     squad.py                  single-gameweek MILP: 15, XI, captain, vice        [done]
     planner.py                multi-week MILP: transfers, banking, hits          [done]
+    pool.py                   drops dominated players before solving             [done]
+    whatif.py                 transfer ladder, budget value, alternatives, ...   [done]
   claude/advisor.py           Claude news check -> 0-100 score (web search)     [done]
   app/
     charts.py                 Plotly figure builders (light + dark, validated palette) [done]
-    report.py                 the self-contained HTML report (S7)                [done]
+    html.py                   Section/Report/render, page CSS + JS, data_table   [done]
+    common.py                 WeekResults, Context, shared lookups               [done]
+    tab_*.py                  one module per dashboard tab (week, squad, fixtures,
+                              scout, model, planner)                             [done]
+    report.py                 build_report: assembles the tabs (S7)              [done]
     glossary.py               the report's glossary (values read from config)    [done]
 scripts/
   run_week.py                 the weekly run (everything, one command)
@@ -172,6 +183,17 @@ reports/                      generated HTML (git-ignored)
 - **An API key can be valid but unusable**: with no credit on the account every
   request is a 400 ("Your credit balance is too low ..."). `check_claude.py` tells you
   in one cheap call; `advisor.api_message` turns API errors into that plain sentence.
+- **Mid-gameweek, FPL lists unplayed matches** (0 minutes) in every player's history.
+  `season_store.played_only` keeps only finished fixtures; never bypass it, or form and
+  the minutes model are corrupted for every club still to play.
+- **Plotly `add_annotation` in a loop is quadratic** (it re-validates every earlier
+  annotation): a 15 x 20 heatmap took 90 s. Build a list and set `layout.annotations`.
+- **DOM ids must be unique in the report** (sections, tables, charts): a clash breaks
+  the page script for every tab. `tests/test_report.py` checks it.
+- **The planner prunes dominated players** (`optimise/pool.py`); pass `prune=False` to
+  check an answer against the full problem (a test does).
+- **The real Anthropic key costs money**: verify runs with `--no-advisor`; offline tests
+  use a fake client. The last successful check is reused from `reports/last_advice.json`.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your
   history; one-off FPL top-ups aren't visible, so `run_week.py --free-transfers N`
   overrides it.
@@ -180,7 +202,8 @@ reports/                      generated HTML (git-ignored)
 
 - [x] 0 Scaffold · [x] 1 Data ingestion · [x] 2 Feature engineering
 - [x] 3 Prediction model · [x] 4 Optimisation · [x] 5 Multi-week planning (no chips)
-- [x] 6 Claude advisor · [x] 7 Interface (`scripts/run_week.py` + HTML report)
+- [x] 6 Claude advisor · [x] 7 Interface (`scripts/run_week.py` + tabbed HTML dashboard)
+- [x] Event model + blend (backtested), return dates from injury news, planner what-ifs
 - [ ] **Chips** — plan wildcard / free hit / bench boost / triple captain in planner.py.
 - [ ] **Full 2025/26 match data** from a public archive (only the top 50 were filed).
 - [ ] Richer opponent stats (team xGA, PPDA) if a source becomes reachable.

@@ -217,6 +217,8 @@ def opponent_matrix(fc, ids, profiles: pd.DataFrame, fixtures: pd.DataFrame,
         if both:
             avg = pd.concat(both, axis=1).mean(axis=1)
             out += [{"id": pid, "opponent": int(opp), "xp": v} for pid, v in avg.items()]
+    if not out:
+        return pd.DataFrame()
     m = pd.DataFrame(out).pivot(index="id", columns="opponent", values="xp")
     m.columns = m.columns.map(teams.set_index("id")["short_name"])
     return m

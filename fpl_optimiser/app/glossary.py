@@ -97,12 +97,42 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "(1.0 = every minute)."),
             ("Points per £m", "Points this season divided by the player's current price: value "
              "for money."),
+            ("Ownership (Owned by)", "The share of FPL managers who have the player. Points from a "
+             "player most rivals own barely move your rank; points from one they don't, do."),
+            ("Differential", "A good player few managers own (under 10% here): a chance to gain rank."),
+            ("Set-piece order", "FPL's first, second... choice for penalties, corners and direct free "
+             "kicks. A penalty is worth about 0.76 xG, so first-choice takers score more."),
+            ("Price-change progress", "FPL's own measure of how close a price change is, from net "
+             "transfers: near +100% a rise is close, near -100% a fall."),
+            ("FPL's estimate (ep_next)", "FPL's own expected points for next gameweek, a simple "
+             "form-based number, shown for comparison."),
+            ("Finishing above xG", "Scoring more goals than the chances were worth. It rarely lasts; "
+             "the models work from xG, so they look through it."),
         ]),
         ("Predictions", [
-            ("Expected points (xP)", "The model's average forecast of a player's points in a "
-             "gameweek: P(plays) x the points he's expected to score if he plays, summed over the "
-             "gameweek's fixtures. An average over many possible outcomes, not a guess at the exact "
-             "score."),
+            ("Expected points (xP)", "The average number of points a player is expected to score in a "
+             f"gameweek, summed over its fixtures: the blend of the points model and the event model "
+             f"({1 - config.EVENT_MODEL_WEIGHT:g} / {config.EVENT_MODEL_WEIGHT:g}). An average over many "
+             "possible outcomes, not a guess at the exact score."),
+            ("Points model", "Gradient-boosted trees that predict P(plays) and the points a player scores "
+             "if he plays, straight from his form, price, last season and the opponent."),
+            ("Event model", "A transparent model that builds expected points from football events: team "
+             "ratings give each fixture's expected goals, and each player's per-90 rates give his xG, xA, "
+             "clean-sheet chance and so on, which FPL's scoring turns into points."),
+            ("Blend", f"What the planner uses: {1 - config.EVENT_MODEL_WEIGHT:g} x the points model + "
+             f"{config.EVENT_MODEL_WEIGHT:g} x the event model. The backtest found it better than either "
+             "alone."),
+            ("Expected minutes (xMins)", "P(60+) x his usual minutes in a full appearance + P(plays but "
+             "under 60) x his usual minutes off the bench."),
+            ("Points by source", "The event model's expected points split into appearance, goals, "
+             "assists, clean sheet, goals conceded, saves, defensive contributions, bonus and cards."),
+            ("Team ratings", "Each club's attack (xG created per game) and defence (xG conceded per game), "
+             "recent matches counting more, with last season as a fading prior. 'Index' = vs the league "
+             "average (1.0)."),
+            ("Fixture ticker", "Each club's expected goals, or clean-sheet chance, gameweek by gameweek: "
+             "which clubs to pick attackers and defenders from."),
+            ("Shrinkage", "Mixing a player's own rate with his position's average when he has played little, "
+             "so a lucky 90 minutes doesn't make him a star."),
             ("P(plays) and P(60+)", "The model's probability that a player gets on the pitch, and "
              "that he plays 60+ minutes (worth an extra point, and needed for a clean sheet)."),
             ("Form (recency weighting)", f"Recent matches count more: a match {half:g} gameweeks "
@@ -148,6 +178,16 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
             ("Optimiser (integer program)", "The solver that picks the squad, XI, captain and "
              "transfers. It finds the highest expected points that obey every FPL rule, exactly, "
              "rather than by rule of thumb."),
+            ("Candidate pool", "The players given to the solver: anyone who could be optimal. A player is "
+             "left out when several others at his position cost no more and score at least as much "
+             "every week."),
+            ("Objective", "The single number the planner maximises: decayed XI, captain and bench points, "
+             "minus the hit penalty, plus the value of transfers still banked."),
+            ("Transfer ladder", "The best plan with exactly 0, 1, 2, ... transfers this week: what each "
+             "extra move is worth, and whether a hit pays."),
+            ("Money freed", "What a sale raises minus what its replacement costs: money another move can use."),
+            ("Binding constraint", "A rule the plan is pressed against, e.g. a club already at 3 players "
+             "or no money left; loosening it would improve the plan."),
         ]),
         ("Model check", [
             ("Backtest (walk-forward)", "Each past gameweek predicted using only what was known "
@@ -160,6 +200,10 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "gameweek (Spearman, -1 to 1). Ordering is what picking needs. Higher is better."),
             ("Top-11 points", "The real points of the 11 players a method rated highest, per "
              "gameweek: the most direct test of picking. Higher is better."),
+            ("Permutation importance", "How much worse a model gets when one input is shuffled (so it "
+             "carries no information): the bigger, the more the model leans on it."),
+            ("Opponent style", "The 20 clubs grouped into tight, middling and leaky defences (k-means on "
+             "goals conceded and FPL's defence ratings)."),
         ]),
         ("News check", [
             ("Action score", "Claude's 0-100 score for how strongly to act on this week's moves "

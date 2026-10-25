@@ -59,6 +59,10 @@ or change `ADVISOR_EFFORT` / `ADVISOR_MAX_SEARCHES` / `ADVISOR_MODEL` in `config
 for every run. API errors are shown in plain words (e.g. "Your credit balance is too
 low ..."), not as the raw JSON body.
 
+**Kept for reuse.** A successful check is saved to `reports/last_advice.json` with the
+gameweek and when it ran (`advisor.save` / `advisor.load`); `run_week.py --no-advisor`
+reuses it for the same gameweek, so rebuilding the report never pays twice.
+
 ## In the report
 The "News check (Claude)" section shows the score, the verdict and summary, a table
 of flagged players with links to their sources, suggested adjustments, risks, and
