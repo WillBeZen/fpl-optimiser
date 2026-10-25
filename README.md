@@ -44,7 +44,7 @@ scratch, just no personal transfer plan or news check.
 ### First time
 1. Set up as above (Python 3.11+; tested on 3.13), then check everything works:
    ```bash
-   python -m pytest -q              # 133 offline tests, about a minute; never touches the network
+   python -m pytest -q              # 142 offline tests, about a minute; never touches the network
    python config.py                 # prints "config OK"
    python scripts/verify_setup.py   # live check: FPL reachable, opponent source, rules match FPL's
    python scripts/check_claude.py   # optional: one tiny Claude request (a fraction of a cent)
@@ -99,10 +99,10 @@ server or internet needed (it's git-ignored; rebuild it each week). Tabs: **This
 (moves, alerts, news check, captain), **My squad** (each player fixture by fixture,
 event by event, and a player explorer), **Fixtures** (team ratings and tickers),
 **Scout** (the market, targets, differentials, price watch, set pieces), **The model**
-(every stage, with your numbers), **Accuracy** (predicted vs actual points over the last
-5 finished gameweeks for every player the planner considers, with a half-life check and
-a reconciliation checklist), **The planner** (every stage), **Player analysis** and a
-**Glossary**. Every table sorts by clicking a column; light and dark themes.
+(every stage, with your numbers), **Accuracy** (every past gameweek replayed as it stood
+at its deadline: the model against simple baselines with gameweek-by-gameweek
+uncertainty, predicted vs actual for every player the planner considers, and data
+checks), **The planner** (every stage), **Player analysis** and a **Glossary**. Every table sorts by clicking a column; light and dark themes.
 
 ### Other scripts
 ```bash

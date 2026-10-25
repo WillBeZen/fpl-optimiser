@@ -132,9 +132,11 @@ CHIP_THRESHOLD_POINTS = {
 
 # Event-model weight (Section 3). The expected points the optimiser uses are a blend:
 # (1 - w) x the points model (gradient-boosted trees) + w x the event model (team
-# ratings -> fixture goals -> each player's goals, assists, clean sheets...). In the
-# walk-forward backtest over 2026/27 GW2-7, w = 0.5 beat both on its own: RMSE 2.20 ->
-# 2.14, rank correlation 0.645 -> 0.659, top-11 points 55.8 -> 56.7. 0 = points model only.
+# ratings -> fixture goals -> each player's goals, assists, clean sheets...). 0 = points
+# model only. 0.5 was picked by looking at 2026/27 GW2-7, the same weeks it was then
+# judged on, so that comparison was in-sample. The honest replay (model/evaluation.py,
+# the Accuracy tab) chooses the weight at each deadline from earlier weeks only; it
+# should be re-chosen on a season it isn't then judged on (last season, once filed).
 EVENT_MODEL_WEIGHT = 0.5
 
 # Injured with no return date (Section 3). FPL's chance of playing covers the next

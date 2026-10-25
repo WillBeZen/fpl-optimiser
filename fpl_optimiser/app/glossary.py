@@ -202,9 +202,16 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "recency-weighted points per gameweek, and the plain average so far this season."),
             ("Accuracy window", f"The last {config.ACCURACY_WINDOW_GW} finished gameweeks, replayed on the "
              "Accuracy tab to see how predictions lined up with what players scored (ACCURACY_WINDOW_GW)."),
-            ("Replay", "Re-running a past gameweek exactly as the model would have predicted it at the "
-             "deadline: fitted only on earlier gameweeks, with config.py's half-life and the planner's blend. "
-             "FPL's injury flags at the time aren't archived, so they can't be replayed."),
+            ("Replay", "Re-running a past gameweek exactly as it stood at its deadline: models fitted only on "
+             "earlier gameweeks, the players, prices and features of the time, the planner's pool rebuilt from "
+             "that deadline's own forecast. FPL's injury flags at the time aren't archived, so they can't be "
+             "replayed."),
+            ("Baseline", "A simple method the model must beat to justify itself: season average, recent "
+             "points, or what similar players (same position and price) usually score."),
+            ("Walk-forward weight", "The blend's event-model weight chosen at each past deadline from earlier "
+             "gameweeks only, so the replay never uses a setting picked by looking at the weeks it is judged on."),
+            ("90% interval", "The range the true difference between two methods probably lies in, given how much "
+             "it varied from gameweek to gameweek. If it includes 0, those gameweeks can't tell the methods apart."),
             ("Bias", "The average of predicted minus actual points. Positive: the model expected too much; "
              "negative: players scored more than predicted."),
             ("Typical miss", "The average size of a miss, in points per player-gameweek (MAE), whichever "
@@ -213,9 +220,9 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "average about 3.5. Shown by grouping player-gameweeks by their prediction."),
             ("Top 11 captured", "The real points of the 11 players the model rated highest each gameweek, as a "
              "share of the 11 who actually scored most (hindsight, so 100% is out of reach)."),
-            ("Reconciliation", "Checking the numbers against independent sources: the match records against "
-             "FPL's official gameweek totals, the replay against the live forecasting code, totals added up "
-             "different ways."),
+            ("Data checks", "Checking the numbers against independent sources: the match records against "
+             "FPL's official gameweek totals, two code paths against each other, totals added up different "
+             "ways. They test the data and the method, not how good the model is."),
             ("Forecast log", "Each weekly run files its forecast for the next gameweek, injury flags and all, so "
              "once that gameweek is played the Accuracy tab can compare the forecast actually made."),
             ("MAE", "Mean absolute error: the average miss, in points per fixture. Lower is better."),

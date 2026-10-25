@@ -188,43 +188,64 @@ def misses(pg: pd.DataFrame, n: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
     return over, under
 
 
-def half_life_check(season: str, rounds: list[int], ids, half_lives, events_data: dict | None = None,
-                    base_preds: pd.DataFrame | None = None,
-                    base_half_life: float = config.RECENCY_HALF_LIFE_GW) -> pd.DataFrame:
-    """Replay the same window at each half-life (rebuilding every form feature and the
-    event model's rates with it) and score the same players. `base_preds` (the
-    replay at base_half_life) is reused rather than recomputed."""
-    from fpl_optimiser.features import multi_season
-    from fpl_optimiser.model import backtest
+def reference_rows(ev, rounds: list[int] | None = None, population: str = "pool") -> pd.DataFrame:
+    """The harness's (model/evaluation.py) player-gameweeks in this module's shape:
+    `predicted` is the planner's blend with its weight chosen walk-forward (the
+    reference), plus the actual points, its error, both models' parts and sources."""
+    from fpl_optimiser.model import evaluation
 
+    pg = evaluation.player_gameweeks(ev, population, rounds)
+    pg = pg.rename(columns={"xp_blend": "predicted", "xp": "points_model", "xp_events": "event_model"})
+    pg["error"] = pg["predicted"] - pg["actual"]
+    return pg
+
+
+def half_life_check(ev, half_lives, rounds: list[int] | None = None) -> pd.DataFrame:
+    """The same deadlines replayed at each half-life (every form feature and the event
+    model's rates rebuilt with it), scored on the same player-gameweeks as `ev`
+    (the pools it built at each deadline). Only the deadline's own gameweek is
+    forecast, so it is quicker than the full replay."""
+    from fpl_optimiser.features import multi_season
+    from fpl_optimiser.model import evaluation
+
+    rounds = rounds or ev.rounds
+    keys = ev.first_week[ev.first_week["in_pool"] & ev.first_week["round"].isin(rounds)][["id", "round"]]
+    keys = keys.drop_duplicates()
     rows = []
     for h in half_lives:
-        if base_preds is not None and h == base_half_life:
-            preds = base_preds
+        if h == ev.half_life:
+            run = ev
         else:
-            table = multi_season.build_all(half_life=h)
-            preds = backtest.walk_forward(table, season, rounds, events_data, half_life=h)
-        s = summary(player_gameweeks(preds, rounds, ids), h)
-        rows.append({"half_life": h, "current": h == base_half_life, **s})
+            run = evaluation.run(ev.season, multi_season.build_all(half_life=h), rounds=rounds, horizon=1,
+                                 half_life=h, with_pools=False)
+        fw = run.first_week.merge(keys, on=["id", "round"])
+        fw = fw.assign(in_pool=True)
+        sub = evaluation.Evaluation(season=ev.season, rounds=rounds, first_week=fw, horizons={}, pools={},
+                                    weights=run.weights, half_life=h)
+        pg = reference_rows(sub, rounds, "pool")
+        rows.append({"half_life": h, "current": h == config.RECENCY_HALF_LIFE_GW, **summary(pg, h)})
     return pd.DataFrame(rows)
 
 
-def reconcile(pg: pd.DataFrame, preds: pd.DataFrame, rounds: list[int], season, ids,
-              half_life: float, event_weight: float, plan_candidates: int | None = None,
+def reconcile(ev, season, rounds: list[int] | None = None, pg: pd.DataFrame | None = None,
               gw_table: pd.DataFrame | None = None) -> list[dict]:
-    """Checks that the numbers are right: each {check, ok (True/False/None = can't
-    tell), detail}. `season` is the filed Season (live points, pending matches,
-    season totals); `preds` the replay's raw rows."""
+    """Data checks for the replay (not a score of the model): each {check, ok
+    (True / False / None = can't tell), detail}. `ev` is the harness's Evaluation,
+    `season` the filed Season (FPL's official gameweek totals, pending matches and
+    season totals)."""
     checks = []
+    rounds = rounds or ev.rounds
+    fw = ev.first_week[ev.first_week["round"].isin(rounds)]
+    pg = reference_rows(ev, rounds, "pool") if pg is None else pg
 
     def add(check, ok, detail):
         checks.append({"check": check, "ok": None if ok is None else bool(ok), "detail": detail})
 
     gws = season.gameweeks.set_index("id")
-    done = [g for g in rounds if bool(gws.at[g, "finished"])]
+    finished = [g for g in rounds if bool(gws.at[g, "finished"])]
     checked = [g for g in rounds if bool(gws.get("data_checked", gws["finished"]).get(g, False))]
-    add("The window is complete", len(done) == len(rounds) == len(checked),
-        f"GW{rounds[0]}-{rounds[-1]}: {len(done)} of {len(rounds)} finished, {len(checked)} checked by FPL"
+    add("Every replayed gameweek is finished", len(finished) == len(rounds) == len(checked),
+        f"GW{rounds[0]}-{rounds[-1]}: {len(finished)} of {len(rounds)} finished, {len(checked)} checked by FPL"
         if rounds else "no finished gameweeks yet")
 
     live = season.live
@@ -233,73 +254,65 @@ def reconcile(pg: pd.DataFrame, preds: pd.DataFrame, rounds: list[int], season, 
         add("Actual points match FPL's official gameweek totals", None,
             "FPL's gameweek totals aren't filed yet (they're filed by a data pull)")
     else:
-        lv = live[live["gw"].isin(have) & live["id"].isin(set(ids))].rename(columns={"gw": "round"})
-        m = lv[["id", "round", "total_points", "minutes"]].merge(
-            pg[["id", "round", "actual", "minutes"]], on=["id", "round"], how="outer", suffixes=("_fpl", "_ours"))
-        m = m[m["round"].isin(have)]
-        # a player with no match record that gameweek scored 0 for us
-        m[["actual", "minutes_ours"]] = m[["actual", "minutes_ours"]].fillna(0)
-        m[["total_points", "minutes_fpl"]] = m[["total_points", "minutes_fpl"]].fillna(0)
-        bad = m[(m["total_points"] != m["actual"]) | (m["minutes_fpl"] != m["minutes_ours"])]
-        add("Actual points match FPL's official gameweek totals", bad.empty,
-            f"{len(m) - len(bad)} of {len(m)} player-gameweeks identical (points and minutes) in "
-            f"GW{have[0]}-{have[-1]}" + ("" if bad.empty else f"; {len(bad)} differ"))
-        # the whole season so far, not just the window: every finished gameweek filed
+        ours = fw[fw["round"].isin(have)].groupby(["id", "round"])[["target_points", "minutes"]].sum()
+        theirs = (live[live["gw"].isin(have)].rename(columns={"gw": "round"})
+                  .set_index(["id", "round"])[["total_points", "minutes"]].reindex(ours.index))
+        same = (ours["target_points"] == theirs["total_points"]) & (ours["minutes"] == theirs["minutes"])
+        add("Actual points match FPL's official gameweek totals", bool(same.all()),
+            f"{int(same.sum())} of {len(same)} replayed player-gameweeks identical (points and minutes) "
+            f"in GW{have[0]}-{have[-1]}")
         allgw = sorted(set(live["gw"]))
-        ours = (season.history[season.history["round"].isin(allgw) & season.history["id"].isin(set(ids))]
-                .groupby("id")["total_points"].sum())
-        theirs = live[live["gw"].isin(allgw) & live["id"].isin(set(ids))].groupby("id")["total_points"].sum()
-        both = pd.concat([ours.rename("ours"), theirs.rename("fpl")], axis=1).fillna(0)
-        same = int((both["ours"] == both["fpl"]).sum())
-        add("Every finished gameweek this season matches FPL", same == len(both),
-            f"{same} of {len(both)} players' points over GW{allgw[0]}-{allgw[-1]} equal FPL's official totals")
-        expl = live[live["gw"].isin(allgw)]
-        add("FPL's own breakdown adds up", bool(expl["explained"].all()),
-            f"each player's points by source sum to his total in {int(expl['explained'].sum())} of {len(expl)} cases")
+        h = season.history[season.history["round"].isin(allgw)].groupby("id")["total_points"].sum()
+        lv = live[live["gw"].isin(allgw)].groupby("id")["total_points"].sum()
+        both = pd.concat([h.rename("ours"), lv.rename("fpl")], axis=1).fillna(0)
+        n_same = int((both["ours"] == both["fpl"]).sum())
+        add("Every finished gameweek this season matches FPL", n_same == len(both),
+            f"{n_same} of {len(both)} players' points over GW{allgw[0]}-{allgw[-1]} equal FPL's official totals")
+        add("FPL's own breakdown adds up", bool(live["explained"].all()),
+            f"each player's points by source sum to his total in {int(live['explained'].sum())} of {len(live)} cases")
 
-    # FPL's season totals also count matches still being played; the filed match
-    # records catch up at the next refresh. Finished gameweeks are unaffected.
     tot = pd.concat([season.history, season.pending])
-    mine = tot[tot["id"].isin(set(ids))].groupby("id")["total_points"].sum()
+    mine = tot.groupby("id")["total_points"].sum()
     fpl_tot = season.players.set_index("id")["total_points"].reindex(mine.index)
     behind = int((mine != fpl_tot).sum())
-    add("Match records are up to date", True if behind == 0 else None,
-        f"all {len(mine)} players' records add up to FPL's season totals" if behind == 0 else
-        f"{behind} of {len(mine)} players have points FPL already counts live (a gameweek in play) that "
-        "the filed match records don't have yet; they arrive with the next refresh, and finished "
-        "gameweeks are unaffected")
+    add("Match records are up to date", behind == 0,
+        f"all {len(mine)} players' match records add up to FPL's season totals" if behind == 0 else
+        f"{behind} of {len(mine)} players have points FPL already counts that the filed match records don't "
+        "have yet (a refresh fetches them); finished gameweeks are unaffected")
 
-    late = pg[pg["trained_to"] >= pg["round"]]
+    late = fw[fw["trained_to"] >= fw["round"]]
     add("No prediction used later data", late.empty,
-        "every gameweek was predicted from a model fitted only on earlier gameweeks"
-        if late.empty else f"{len(late)} predictions trained on their own gameweek or later")
+        "each deadline's models, features, baselines and pool came only from earlier gameweeks"
+        if late.empty else f"{len(late)} predictions used their own gameweek or later")
 
-    win_all = preds[preds["round"].isin(rounds)]
-    used = set()
-    for col in ("half_life", "events_half_life"):          # recorded by build_all / walk_forward
-        if col in win_all:
-            used |= set(win_all[col].dropna().astype(float))
-    used = used or {float(half_life)}
+    wrong = [r for r, src in ev.weight_rounds.items() if any(s >= r for s in src)] if ev.weight_rounds else []
+    add("Blend weights chosen from earlier weeks only", not wrong,
+        "each deadline's event-model weight: " + ", ".join(f"GW{r} {w:g}" for r, w in ev.weights.items()
+                                                           if r in rounds)
+        if not wrong else f"deadlines {wrong} used their own or later weeks")
+
+    gap = (fw["xp_blend"] - ((1 - fw["event_weight"]) * fw["xp"] + fw["event_weight"] * fw["xp_events"])).abs().max()
+    missing = int(fw["xp_blend"].isna().sum())
+    add("Predictions are the planner's blend", missing == 0 and (np.isnan(gap) or gap < 1e-9),
+        "(1 - w) x points model + w x event model for every prediction" + (f"; {missing} missing" if missing else ""))
+
+    used = set(ev.first_week["half_life"].dropna().astype(float)) if "half_life" in ev.first_week else set()
+    used = used or {float(ev.half_life)}
     add("Predictions use the half-life in config.py", used == {float(config.RECENCY_HALF_LIFE_GW)},
         "form features and event-model rates built with a half-life of "
         + ", ".join(f"{h:g}" for h in sorted(used)) + f" gameweeks (config.py: {config.RECENCY_HALF_LIFE_GW:g})")
 
-    win = preds[preds["round"].isin(rounds) & preds["id"].isin(set(ids))]
-    if "xp_blend" in win:
-        gap = (win["xp_blend"] - ((1 - event_weight) * win["xp"] + event_weight * win["xp_events"])).abs().max()
-        missing = int(win["xp_blend"].isna().sum())
-        add("Predictions are the planner's blend", missing == 0 and (np.isnan(gap) or gap < 1e-9),
-            f"(1 - {event_weight:g}) x points model + {event_weight:g} x event model for every prediction"
-            + (f"; {missing} missing" if missing else ""))
-    else:
-        add("Predictions are the planner's blend", None, "the event model wasn't replayed (points model only)")
+    pool_rounds = [r for r in rounds if r in ev.pools]
+    add("Pools rebuilt at each deadline", len(pool_rounds) == len(rounds) and all(ev.pools[r] for r in pool_rounds),
+        "each deadline's pool pruned from that deadline's own forecast: "
+        + ", ".join(f"GW{r} {len(ev.pools[r])}" for r in pool_rounds))
 
-    if plan_candidates is not None:
-        add("Players are the planner's candidate pool", len(set(ids)) == plan_candidates,
-            f"{len(set(ids))} players here, {plan_candidates} in the planner's pool")
+    add("Every prediction has a match record", ev.unmatched == 0,
+        "every predicted player-fixture was played (or sat out) and is in FPL's records"
+        if ev.unmatched == 0 else f"{ev.unmatched} predicted player-fixtures have no match record")
 
-    sums = [float(pg["predicted"].sum()), float(win[predicted_column(win)].sum())]
-    acts = [float(pg["actual"].sum()), float(win["target_points"].sum())]
+    sums = [float(pg["predicted"].sum()), float(fw[fw["in_pool"]]["xp_blend"].sum())]
+    acts = [float(pg["actual"].sum()), float(fw[fw["in_pool"]]["target_points"].sum())]
     if gw_table is not None and len(gw_table):
         sums.append(float(gw_table["predicted"].sum()))
         acts.append(float(gw_table["actual"].sum()))
@@ -309,39 +322,22 @@ def reconcile(pg: pd.DataFrame, preds: pd.DataFrame, rounds: list[int], season, 
     return checks
 
 
-def forecast_path_check(table: pd.DataFrame, season_name: str, gw: int, preds: pd.DataFrame,
-                        event_weight: float = config.EVENT_MODEL_WEIGHT) -> dict:
-    """Is the replay exactly what the live forecasting code would have said? Rebuilds
-    gameweek `gw` through predict's own path (features as of its deadline, the models
-    fitted on earlier gameweeks, the event model, the blend), with that week's prices
-    and no injury flags, and compares every player with the replay."""
-    from fpl_optimiser.features import build, multi_season
-    from fpl_optimiser.ingest import season_store
-    from fpl_optimiser.model import points
+def forecast_path_check(table: pd.DataFrame, ev, gw: int | None = None) -> dict:
+    """Do two independent code paths agree? Gameweek `gw` (default: the latest
+    replayed) predicted again from the training table (backtest.walk_forward: one
+    row per match played) and compared, player by fixture, with the harness's
+    forecast-path predictions."""
+    from fpl_optimiser.model import backtest
 
-    cur, prior, profiles = multi_season.season_inputs(season_name)
-    players = cur.players
-    if "value" in cur.history:                    # each player's price at the time, as the replay uses
-        then = cur.history[cur.history["round"] == gw].groupby("id")["value"].first() / 10
-        players = players.assign(price=players["id"].map(then).fillna(players["price"]))
-    upcoming = cur.fixtures.assign(finished=cur.fixtures["finished"].where(cur.fixtures["gameweek"] != gw, False))
-    rows = build.build_prediction_table(cur.history, upcoming, players, profiles, as_of_round=gw,
-                                        gameweeks=[gw], prior=prior)
-    known = table.dropna(subset=["target_points", "minutes"])
-    train = known[(known["season"] < season_name) | ((known["season"] == season_name) & (known["round"] < gw))]
-    out = rows.join(points.fit(train).predict(rows))
-    prev_name = season_store.previous_season(season_name)
-    prev = season_store.load(prev_name) if prev_name in season_store.available() else None
-    ratings = events.team_ratings(cur.fixtures, cur.teams, gw, cur.history,
-                                  prev.fixtures if prev else None, prev.teams if prev else None)
-    rates = events.player_rates(cur.history, cur.players, gw, prior)
-    out["xp_events"] = events.expected_events(out, ratings, rates)["xp_events"].to_numpy()
-    path_xp = ((1 - event_weight) * out["xp"] + event_weight * out["xp_events"]).groupby(out["id"]).sum()
-    col = predicted_column(preds)
-    replay = preds[preds["round"] == gw].groupby("id")[col].sum()
-    both = pd.concat([path_xp.rename("path"), replay.rename("replay")], axis=1).dropna()
-    gap = float((both["path"] - both["replay"]).abs().max()) if len(both) else float("nan")
-    ok = len(both) > 0 and gap < 1e-6
-    return {"check": "The replay is exactly what the forecast would have said", "ok": bool(ok),
-            "detail": f"GW{gw} rebuilt through the live forecasting code for {len(both)} players: "
-                      f"largest difference {gap:.1e} points (same prices as then, no injury flags)"}
+    gw = gw or ev.rounds[-1]
+    data = events.season_data(ev.season)
+    wf = backtest.walk_forward(table, ev.season, rounds=[gw], events_data=data, half_life=ev.half_life)
+    fw = ev.first_week[ev.first_week["round"] == gw]
+    m = fw[["id", "opponent_team", "xp", "xp_events"]].merge(
+        wf[["id", "opponent_team", "xp", "xp_events"]], on=["id", "opponent_team"], suffixes=("_h", "_t"))
+    gap = float(max((m["xp_h"] - m["xp_t"]).abs().max(), (m["xp_events_h"] - m["xp_events_t"]).abs().max())) \
+        if len(m) else float("nan")
+    ok = len(m) == len(fw) == len(wf) and gap < 1e-9
+    return {"check": "Two code paths give the same predictions", "ok": bool(ok),
+            "detail": f"GW{gw} predicted from the training table and from the forecasting code: {len(m)} of "
+                      f"{len(fw)} player-fixtures matched, largest difference {gap:.1e} points"}

@@ -25,7 +25,7 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (133 tests today)
+python -m pytest -q                            # MUST stay green (142 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
@@ -70,7 +70,8 @@ fpl_optimiser/
     backtest.py               walk-forward backtest: blend, points, events, baselines [done]
     predict.py                forecast(): blended xp for the next N gameweeks    [done]
     explain.py                numbers behind the report's "The model" tab        [done]
-    accuracy.py               predicted vs actual over the last N gameweeks, reconciled [done]
+    evaluation.py             THE honest replay: every past deadline as it stood, all methods [done]
+    accuracy.py               accuracy views + data checks on the replay        [done]
     forecast_log.py           files each run's next-gameweek forecast            [done]
   optimise/
     squad.py                  single-gameweek MILP: 15, XI, captain, vice        [done]
@@ -199,6 +200,15 @@ reports/                      generated HTML (git-ignored)
 - **FPL's season totals (bootstrap `total_points`) count matches still in play**; the
   filed match records lag until the next refresh. Check finished gameweeks against
   `event/<gw>/live` (filed as `event-live_<gw>.json`), never against bootstrap totals.
+- **Every model input must be knowable at the deadline.** The opponent "style" input was
+  clustered on season-to-date goals conceded (for a past match that includes the match
+  itself) and inflated the backtest's top-11 by ~14 points; it is no longer an input
+  (`model/inputs.py`). Never add a feature built from season-level or current snapshots.
+- **Two code paths, one answer:** numeric inputs are rounded (`inputs.ROUND_TO`) so the
+  training table and the forecast can't put a value on different sides of a tree split.
+- **Evaluate honestly** with `model/evaluation.py` (pools, prices, features, blend
+  weight all as of each deadline). Don't tune a setting on the weeks you then quote as
+  evidence; `EVENT_MODEL_WEIGHT` (0.5) was, and is flagged as in-sample.
 - **The accuracy replay can't apply past injury flags** (FPL doesn't archive them);
   `forecast_log` files each week's real forecast so later weeks can compare it.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your

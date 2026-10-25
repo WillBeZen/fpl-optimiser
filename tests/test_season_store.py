@@ -111,3 +111,23 @@ def test_only_finished_matches_count_as_played():
     assert list(kept["fixture"]) == [10, 11]
     assert ss.played_only(history.drop(columns="fixture"), fixtures).equals(
         history.drop(columns="fixture"))                       # nothing to check against
+
+
+def test_player_files_are_refetched_after_their_club_plays(tmp_path, fake_api, monkeypatch):
+    """A file fetched before his club's latest match ended is stale, however young."""
+    import os
+
+    import pandas as pd
+    fixtures = [{"id": 1, "team_h": 1, "team_a": 2, "kickoff_time": "2026-08-21T19:00:00Z"},
+                {"id": 2, "team_h": 2, "team_a": 1, "kickoff_time": "2099-01-01T15:00:00Z"}]  # not played
+    end = pd.Timestamp("2026-08-21T19:00:00Z").timestamp() + ss.MATCH_HOURS * 3600
+    assert ss.last_played(fixtures) == {1: end, 2: end}
+
+    ss.pull_live(root=tmp_path, **QUIET)
+    f = tmp_path / "2026-27" / "element-summary_1.json"
+    os.utime(f, (end - 3600, end - 3600))                     # fetched an hour before that match ended
+    monkeypatch.setattr(ss, "last_played", lambda fixtures, now=None: {1: end, 2: end})
+    n = len(fake_api)
+    ss.pull_live(root=tmp_path, ttl_hours=1e9, **QUIET)       # young enough by age...
+    again = [c for c in fake_api[n:] if c.startswith("element-summary")]
+    assert again == ["element-summary/1"]                     # ...but his club has played since

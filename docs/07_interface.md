@@ -82,12 +82,19 @@ model responds to the opponent; the minutes and points models and what they lean
 (permutation importance); the event model's formulas and average points by source; the
 blend and FPL's flags (who they cut); and the walk-forward backtest of every method.
 
-**6 · Accuracy** — how predicted points lined up with what players scored over the last
-`ACCURACY_WINDOW_GW` finished gameweeks, for every player the planner considers (not
-dominated): the summary, gameweek by gameweek, every player's predicted and actual
-points each gameweek (shaded by over- or under-prediction), player totals, calibration,
-by position and by scoring source, the biggest misses, the half-life check and a
-reconciliation checklist. See `docs/08_accuracy.md`.
+**6 · Accuracy** — every finished gameweek replayed as it stood at its deadline (models,
+features, players, prices and the planner's pool from before it only):
+- every method side by side, for the planner's pool and for every player: the blend,
+  each model alone, and four simple baselines;
+- **whether the blend beats each one**, gameweek by gameweek with 90% intervals;
+- each method gameweek by gameweek, and the blend's walk-forward weight;
+- every pool player's predicted and actual points over the last `ACCURACY_WINDOW_GW`
+  gameweeks, shaded by over- or under-prediction;
+- player totals, calibration, and accuracy by position and by scoring source;
+- the biggest misses, the half-life check, and the logged deadline forecasts;
+- **data checks**, kept separate because they test the data, not the model.
+
+See `docs/08_accuracy.md`.
 
 **7 · The planner** — the integer program in twelve stages, with your numbers: inputs
 (bought for / now / sells for, bank, free transfers, dials); the candidate pool; the

@@ -141,3 +141,22 @@ def load(manager_id: int, bootstrap: dict, next_gw: int) -> MyTeam:
         picks = get(f"entry/{manager_id}/event/{gw - 1}/picks")
         note = f"GW{gw} was a free hit, so your squad reverts to GW{gw - 1}'s."
     return assemble(manager_id, history, transfers, picks, bootstrap, next_gw, note)
+
+
+def squads_before(manager_id: int, gameweeks) -> dict[int, list[int]]:
+    """Your squad going into each of `gameweeks` (network; cached): the picks from the
+    gameweek before (the one before that after a free hit, since the squad reverts).
+    Gameweeks before you joined, or that FPL can't serve, are left out."""
+    get = lambda path: fpl_api._cached_get(path, ttl_hours=_TTL_H)  # noqa: E731
+    out = {}
+    for g in gameweeks:
+        if g < 2:
+            continue
+        try:
+            picks = get(f"entry/{manager_id}/event/{g - 1}/picks")
+            if picks.get("active_chip") == "freehit" and g > 2:
+                picks = get(f"entry/{manager_id}/event/{g - 2}/picks")
+            out[g] = [p["element"] for p in picks.get("picks", [])]
+        except Exception:                      # not entered yet, or FPL unavailable: no squad
+            continue
+    return out

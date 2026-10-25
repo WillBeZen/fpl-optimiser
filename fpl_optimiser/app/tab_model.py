@@ -38,8 +38,6 @@ INPUT_NOTES = {
     "form_starts_rate": "recency-weighted share of matches with 60+ minutes",
     "games_played": "this season's appearances so far",
     "opp_gc_pg_asof": "the opponent's recency-weighted goals conceded per game",
-    "opp_archetype": "the opponent's defensive style (Fixtures tab)",
-    "opp_str_def": "FPL's defence rating for the opponent at that venue",
     "x_xgi_oppgc": "attacking form x opponent leakiness (an interaction)",
     "prev_points_per_gw": "last season's points per gameweek",
     "prev_minutes_per_gw": "last season's minutes per gameweek",
@@ -50,6 +48,7 @@ INPUT_NOTES = {
     "is_cold": "fewer than 3 games yet (form filled from the position's typical value)",
     "has_prev_season": "has an FPL record last season",
     "prev_changed_team": "changed club since last season",
+    "earlier_season": "a training row from last season (filed for its top 50 players only), never when predicting",
     "position": "GK / DEF / MID / FWD",
 }
 
@@ -242,7 +241,7 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
     w_ev = fc.event_weight
     blocks = [stage(9, "Blending and injury flags",
                     f"The planner uses (1 - {w_ev:g}) x points model + {w_ev:g} x event model "
-                    "(EVENT_MODEL_WEIGHT in config.py; the backtest below is why). FPL's chance of playing "
+                    "(EVENT_MODEL_WEIGHT in config.py; the Accuracy tab compares it with a weight chosen only from earlier weeks). FPL's chance of playing "
                     "then scales next gameweek; a return date in the news ('Expected back 8 Nov') keeps a "
                     "player out until then, and 'Unknown return date' brings him back gradually "
                     f"({', '.join(f'{x:.0%}' for x in config.UNKNOWN_RETURN_RAMP)}).")]
@@ -261,10 +260,13 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
     r.sections.append(Section("m-blend", "9 · Blend", "", blocks, tab=TAB))
 
     # 10 · validation ----------------------------------------------------------------------
-    blocks = [stage(10, "Validation: the walk-forward backtest",
-                    "Each past gameweek is predicted using only what was known before it, then compared "
-                    "with what happened. Top-11 = the real points of the 11 players each method rated "
-                    "highest; RMSE = typical miss per player-match; rank correlation = how well it orders players.")]
+    blocks = [stage(10, "Validation: every past deadline replayed",
+                    "Each past gameweek is predicted as it stood at its deadline (models, features, players and "
+                    "prices from before it only), then compared with what happened, alongside simple methods "
+                    "on the same players. Top-11 = the real points of the 11 players each method rated "
+                    "highest; RMSE = typical miss per player-match; rank correlation = how well it orders "
+                    "players. Every player here; the Accuracy tab has the planner's pool, gameweek-by-gameweek "
+                    "uncertainty and the data checks.")]
     if w.backtest is not None:
         bt = w.backtest
         blocks.append(card(r.chart("backtest", charts.top_bars, list(bt["method"]), list(bt["top11_points"]),

@@ -31,36 +31,37 @@ from fpl_optimiser.app import report
 from fpl_optimiser.claude import advisor
 from fpl_optimiser.features import multi_season
 from fpl_optimiser.ingest import my_team, rules_check, season_store
-from fpl_optimiser.model import accuracy, backtest, events, forecast_log, predict
-from fpl_optimiser.optimise import planner, pool, squad, whatif
+from fpl_optimiser.model import accuracy, evaluation, forecast_log, predict
+from fpl_optimiser.optimise import planner, squad, whatif
 
 ADVICE_FILE = config.ROOT / "reports" / "last_advice.json"
 
 
-def _accuracy(fc, table, replay, events_data, mine, plan):
-    """The Accuracy tab's heavy parts (the half-life replays and the forecast-path
-    check), plus its headline and reconciliation in the terminal."""
+def _accuracy(fc, table, team_id):
+    """Replay every finished gameweek as it stood (model/evaluation.py), the half-life
+    check and the code-path check; print the verdict and the data checks."""
     season = season_store.load(fc.season)
-    rounds = [g for g in accuracy.window(season.gameweeks) if g in set(replay["round"])]
-    if not rounds:
-        return None, None
+    done = sorted(int(g) for g in season.gameweeks.loc[season.gameweeks["finished"] == True, "id"])  # noqa: E712
+    if len(done) < 2:
+        return None, None, None
+    squads = my_team.squads_before(team_id, done[1:]) if team_id else {}
+    ev = evaluation.run(fc.season, table, squads=squads)
     h = config.RECENCY_HALF_LIFE_GW
-    ids = pool.prune(fc.xp, fc.players, keep=mine.squad_ids if mine else [])
-    print(f"    accuracy: GW{rounds[0]}-{rounds[-1]} replayed at half-lives {h / 2:g}, {h:g}, {h * 2:g} ...")
-    half_lives = accuracy.half_life_check(fc.season, rounds, ids, (h / 2, h, h * 2), events_data, base_preds=replay)
-    path_check = accuracy.forecast_path_check(table, fc.season, rounds[-1], replay, fc.event_weight)
-    pg = accuracy.player_gameweeks(replay, rounds, ids)
-    s = accuracy.summary(pg)
-    print(f"    {len(ids)} players: predicted {s['predicted']:,.0f}, scored {s['actual']:,.0f} "
-          f"(bias {s['bias']:+.2f} a player-gameweek), typical miss {s['mae']:.2f}, "
-          f"rank correlation {s['rank_corr']:.2f}")
-    checks = accuracy.reconcile(pg, replay, rounds, season, ids, h, fc.event_weight,
-                                plan.stats.get("candidates") if plan is not None else None) + [path_check]
-    print(f"    reconciliation: {sum(c['ok'] is True for c in checks)} of {len(checks)} checks pass")
-    for c in checks:
-        if c["ok"] is not True:
-            print(f"      {'FAIL' if c['ok'] is False else 'info'}: {c['check']} - {c['detail']}")
-    return half_lives, path_check
+    print(f"    accuracy: GW{ev.rounds[0]}-{ev.rounds[-1]} replayed as each deadline stood; "
+          f"half-lives {h / 2:g} and {h * 2:g} for comparison ...")
+    half_lives = accuracy.half_life_check(ev, (h / 2, h, h * 2))
+    path_check = accuracy.forecast_path_check(table, ev)
+    pgw = evaluation.player_gameweeks(ev, "pool")
+    s = evaluation.summary(evaluation.by_gameweek(pgw), pgw).set_index("method")
+    ref, base = s.loc[evaluation.REFERENCE], s.loc["pos_price_p"]
+    print(f"    the planner's pool: blend RMSE {ref['rmse']:.3f}, top 11 {ref['top11']:.1f} a gameweek; "
+          f"simplest strong baseline (position/price x P(plays)) {base['rmse']:.3f}, {base['top11']:.1f}")
+    checks = accuracy.reconcile(ev, season) + [path_check]
+    bad = [c for c in checks if c["ok"] is not True]
+    print(f"    data checks: {len(checks) - len(bad)} of {len(checks)} pass")
+    for c in bad:
+        print(f"      {'FAIL' if c['ok'] is False else 'info'}: {c['check']} - {c['detail']}")
+    return ev, half_lives, path_check
 
 
 def main() -> int:
@@ -160,18 +161,16 @@ def main() -> int:
         print(f"5/6 no new news check; reusing GW{fc.next_gw}'s from {advice.checked_at} UTC" if advice
               else "5/6 skipping the Claude news check")
 
-    bt = replay = half_lives = path_check = None
+    bt = ev = half_lives = path_check = None
     if not args.quick:
-        print("    re-checking the models (walk-forward backtest) ...")
-        events_data = events.season_data(fc.season)
-        replay = backtest.walk_forward(table, fc.season, events_data=events_data)
-        bt = backtest.summarise(replay)
-        half_lives, path_check = _accuracy(fc, table, replay, events_data, mine, plan)
+        print("    re-checking the models: every past deadline replayed as it stood ...")
+        ev, half_lives, path_check = _accuracy(fc, table, team_id)
+        bt = evaluation.backtest_table(ev) if ev is not None else None
 
     print("6/6 writing the report ...")
     week = report.WeekResults(forecast=fc, wildcard=wildcard, plan=plan, baseline=baseline,
                               team=mine, advice=advice, backtest=bt, table=table, ladder=ladder,
-                              budget=budget, chips=chip_grid, replay=replay, half_lives=half_lives,
+                              budget=budget, chips=chip_grid, evaluation=ev, half_lives=half_lives,
                               forecast_check=path_check)
     out = report.build_report(fc.season, week=week).write()
 

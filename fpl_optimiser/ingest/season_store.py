@@ -97,6 +97,25 @@ def _fresh(path: Path, ttl_hours: float) -> bool:
     return path.exists() and (time.time() - path.stat().st_mtime) < ttl_hours * 3600
 
 
+MATCH_HOURS = 2.5          # a match is over (and its data out) this long after kick-off
+
+
+def last_played(fixtures: list, now: float | None = None) -> dict[int, float]:
+    """Club id -> when its latest match ended (epoch seconds, kick-off + MATCH_HOURS),
+    counting only matches already over."""
+    now = time.time() if now is None else now
+    out: dict[int, float] = {}
+    for fx in fixtures:
+        kick = fx.get("kickoff_time")
+        if not kick:
+            continue
+        end = pd.Timestamp(kick).timestamp() + MATCH_HOURS * 3600
+        if end <= now:
+            for team in (fx.get("team_h"), fx.get("team_a")):
+                out[team] = max(out.get(team, 0.0), end)
+    return out
+
+
 def pull_live(limit: int | None = None, ttl_hours: float = 12.0, pause_s: float = 0.1,
               root: Path | None = None, log=print) -> str:
     """File the live season (bootstrap, fixtures, every player's element-summary).
@@ -115,10 +134,15 @@ def pull_live(limit: int | None = None, ttl_hours: float = 12.0, pause_s: float 
 
     ranked = sorted(bootstrap["elements"], key=lambda p: p.get("total_points") or 0, reverse=True)
     ids = [p["id"] for p in ranked][:limit]
+    team_of = {p["id"]: p.get("team") for p in bootstrap["elements"]}
+    played = last_played(json.loads((d / "fixtures.json").read_text()))
     fetched = 0
     for i, pid in enumerate(ids, 1):
         f = d / f"element-summary_{pid}.json"
-        if not _fresh(f, ttl_hours):
+        # re-fetch if older than ttl_hours, or if his club has played since it was fetched
+        # (otherwise FPL's live season totals run ahead of the filed match records)
+        stale = f.exists() and played.get(team_of.get(pid), 0) > f.stat().st_mtime
+        if stale or not _fresh(f, ttl_hours):
             _write(f, fpl_api.fetch(f"element-summary/{pid}"))
             fetched += 1
             time.sleep(pause_s)

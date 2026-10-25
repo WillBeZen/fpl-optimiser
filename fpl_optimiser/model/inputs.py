@@ -2,6 +2,15 @@
 
 One list, used by both the minutes model and the points model, so they can never
 drift apart. Identity columns (id, names, round) and the targets are never inputs.
+
+Every input must be knowable at the deadline of the match it describes. Two
+columns the table still carries for the report are deliberately NOT inputs:
+  opp_archetype  the opponent's defensive "style", clustered on its goals conceded
+                 over the season so far, which for a past match includes that match
+                 (future information: it inflated the backtest's top-11 by ~14 points)
+  opp_str_def    FPL's defence rating, a current snapshot (0 for every club in
+                 2026/27); its only signal was which season a row came from, now the
+                 explicit `earlier_season` flag
 """
 from __future__ import annotations
 
@@ -11,13 +20,15 @@ NUMERIC = [
     "price",
     "form_points_pg", "form_minutes_pg", "form_xg_pg", "form_xa_pg", "form_xgi_pg",
     "form_defcon_pg", "form_bonus_pg", "form_bps_pg", "form_starts_rate", "games_played",
-    "opp_gc_pg_asof", "opp_archetype", "opp_str_def", "x_xgi_oppgc",
+    "opp_gc_pg_asof", "x_xgi_oppgc",
     "prev_points_per_gw", "prev_minutes_per_gw", "prev_points_per_90",
     "prev_xgi_per_90", "prev_defcon_per_90",
 ]
-FLAGS = ["was_home", "is_cold", "has_prev_season", "prev_changed_team"]
+FLAGS = ["was_home", "is_cold", "has_prev_season", "prev_changed_team",
+         "earlier_season"]   # a row from an earlier season (multi_season); always False when predicting
 POSITIONS = ["GK", "DEF", "MID", "FWD"]
 FEATURES = NUMERIC + FLAGS + ["position"]
+ROUND_TO = 6          # decimal places kept in every numeric input
 
 
 def design_matrix(rows: pd.DataFrame) -> pd.DataFrame:
@@ -26,9 +37,13 @@ def design_matrix(rows: pd.DataFrame) -> pd.DataFrame:
     Numbers stay as floats with NaN meaning "unknown" (the trees handle it), flags
     become 0/1, and position becomes a categorical the trees can split on directly.
     """
-    X = rows[NUMERIC].astype(float).copy()
+    # rounded so the same feature computed by two code paths (the training table's
+    # matrix products, the forecast's probe rows) lands in the same tree bin: they
+    # differ only by floating-point rounding (~1e-16), which can tip a value sitting
+    # exactly on a split point
+    X = rows[NUMERIC].astype(float).round(ROUND_TO).copy()
     for col in FLAGS:
-        X[col] = rows[col].astype(float)
+        X[col] = rows[col].astype(float) if col in rows else 0.0
     X["position"] = pd.Categorical(rows["position"], categories=POSITIONS)
     return X[FEATURES]
 

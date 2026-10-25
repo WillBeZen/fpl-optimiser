@@ -82,51 +82,64 @@ def test_calibration_position_source_and_misses():
     assert ms["didnt_play"] == 3 and 0 < ms["share_from_absent"] < 1
 
 
-def _season(pg, live_points=None):
-    """A Season-like object whose FPL figures agree with `pg`."""
-    rounds = sorted(pg["round"].unique())
-    live = pg.rename(columns={"round": "gw", "actual": "total_points"})[["id", "gw", "total_points", "minutes"]]
+def _evaluation():
+    """A harness result (model/evaluation.py) built from _preds(): three players, GW3-5."""
+    from fpl_optimiser.model import evaluation
+    fw = _preds().assign(fixture_id=lambda d: d.index, event_weight=0.5, in_pool=True,
+                         opponent_team=9)
+    return evaluation.Evaluation(season="2026-27", rounds=[3, 4, 5], first_week=fw, horizons={},
+                                 pools={3: {1, 2, 3}, 4: {1, 2, 3}, 5: {1, 2, 3}},
+                                 weights={3: 0.5, 4: 0.5, 5: 0.5}, weight_rounds={3: [], 4: [3], 5: [3, 4]})
+
+
+def _season(ev, live_points=None):
+    """A Season-like object whose FPL figures agree with the evaluation's actuals."""
+    pg = ev.first_week.groupby(["id", "round"])[["target_points", "minutes"]].sum().reset_index()
+    live = pg.rename(columns={"round": "gw"})
     if live_points is not None:
-        live = live.assign(total_points=live_points)
-    live = live.assign(explained=True)
-    history = pg.rename(columns={"actual": "total_points"})[["id", "round", "total_points", "minutes"]]
+        live = live.assign(target_points=live_points)
+    live = live.rename(columns={"target_points": "total_points"}).assign(explained=True)
+    history = ev.first_week.rename(columns={"target_points": "total_points"})[["id", "round", "total_points", "minutes"]]
     totals = history.groupby("id")["total_points"].sum()
-    return NS(gameweeks=pd.DataFrame({"id": rounds, "finished": True, "data_checked": True}).set_index("id", drop=False),
+    rounds = sorted(pg["round"].unique())
+    return NS(gameweeks=pd.DataFrame({"id": rounds, "finished": True, "data_checked": True}),
               live=live, history=history, pending=history.iloc[0:0],
               players=pd.DataFrame({"id": totals.index, "total_points": totals.to_numpy()}))
 
 
-def test_reconciliation_passes_when_everything_agrees_and_catches_problems():
-    preds = _preds()
-    rounds, ids = [3, 4, 5], [1, 2, 3]
-    pg = accuracy.player_gameweeks(preds, rounds, ids)
-    gw = accuracy.by_gameweek(pg)
-    ok = accuracy.reconcile(pg, preds, rounds, _season(pg), ids, config.RECENCY_HALF_LIFE_GW, 0.5, 3, gw)
+def test_data_checks_pass_when_everything_agrees_and_catch_problems():
+    ev = _evaluation()
+    ok = accuracy.reconcile(ev, _season(ev))
     assert all(c["ok"] is True for c in ok), [c for c in ok if c["ok"] is not True]
 
-    wrong = accuracy.reconcile(pg, preds, rounds, _season(pg, live_points=pg["actual"] + 1), ids,
-                               config.RECENCY_HALF_LIFE_GW, 0.5)
-    assert next(c for c in wrong if "official gameweek" in c["check"])["ok"] is False
+    def failed(check_words, ev=ev, season=None):
+        out = accuracy.reconcile(ev, season or _season(ev))
+        return next(c for c in out if check_words in c["check"])["ok"] is False
 
-    leaky = preds.assign(trained_to=preds["round"])
-    bad = accuracy.reconcile(accuracy.player_gameweeks(leaky, rounds, ids), leaky, rounds, _season(pg), ids,
-                             config.RECENCY_HALF_LIFE_GW, 0.5)
-    assert next(c for c in bad if "later data" in c["check"])["ok"] is False
+    bad_live = _season(ev, live_points=_season(ev).live["total_points"] + 1)
+    assert failed("official gameweek", season=bad_live)
+    leaky = _evaluation()
+    leaky.first_week["trained_to"] = leaky.first_week["round"]
+    assert failed("later data", ev=leaky)
+    other_h = _evaluation()
+    other_h.first_week["half_life"] = 4.0
+    assert failed("half-life", ev=other_h)
+    broken = _evaluation()
+    broken.first_week["xp_blend"] += 0.1
+    assert failed("blend", ev=broken)
+    peeking = _evaluation()
+    peeking.weight_rounds = {3: [], 4: [3, 4], 5: [3, 4]}
+    assert failed("Blend weights", ev=peeking)
+    unmatched = _evaluation()
+    unmatched.unmatched = 2
+    assert failed("match record", ev=unmatched)
+    no_pools = _evaluation()
+    no_pools.pools = {3: {1}}
+    assert failed("Pools", ev=no_pools)
 
-    other_h = preds.assign(half_life=4.0)
-    bad = accuracy.reconcile(pg, other_h, rounds, _season(pg), ids, config.RECENCY_HALF_LIFE_GW, 0.5)
-    assert next(c for c in bad if "half-life" in c["check"])["ok"] is False
-
-    unblended = preds.assign(xp_blend=preds["xp_blend"] + 0.1)
-    bad = accuracy.reconcile(pg, unblended, rounds, _season(pg), ids, config.RECENCY_HALF_LIFE_GW, 0.5)
-    assert next(c for c in bad if "blend" in c["check"])["ok"] is False
-    assert next(c for c in accuracy.reconcile(pg, preds, rounds, _season(pg), ids, 8.0, 0.5, 99)
-                if "pool" in c["check"])["ok"] is False
-
-    no_live = _season(pg)
+    no_live = _season(ev)
     no_live.live = pd.DataFrame()
-    info = next(c for c in accuracy.reconcile(pg, preds, rounds, no_live, ids, 8.0, 0.5)
-                if "official" in c["check"])
+    info = next(c for c in accuracy.reconcile(ev, no_live) if "official" in c["check"])
     assert info["ok"] is None
 
 
@@ -143,18 +156,18 @@ def test_forecasts_are_logged_and_read_back(tmp_path):
 
 def test_half_life_check_and_forecast_path_on_a_filed_store(two_seasons):
     from fpl_optimiser.features import multi_season
-    from fpl_optimiser.model import backtest
+    from fpl_optimiser.model import evaluation
 
     table = multi_season.build_all()
     assert (table["half_life"] == config.RECENCY_HALF_LIFE_GW).all()      # recorded on the table
-    data = events.season_data("2026-27")
-    preds = backtest.walk_forward(table, "2026-27", rounds=[2], events_data=data)
-    assert (preds["events_half_life"] == config.RECENCY_HALF_LIFE_GW).all()
-    ids = list(preds["id"].unique())
+    ev = evaluation.run(table=table, horizon=1)
     h = config.RECENCY_HALF_LIFE_GW
-    hl = accuracy.half_life_check("2026-27", [2], ids, (h / 2, h), data, base_preds=preds)
+    hl = accuracy.half_life_check(ev, (h / 2, h))
     assert hl["half_life"].tolist() == [h / 2, h] and hl["current"].tolist() == [False, True]
-    assert (hl["player_gameweeks"] == len(accuracy.player_gameweeks(preds, [2], ids))).all()
+    pool_rows = ev.first_week[ev.first_week["in_pool"]][["id", "round"]].drop_duplicates()
+    assert (hl["player_gameweeks"] == len(pool_rows)).all()               # the same player-gameweeks
 
-    check = accuracy.forecast_path_check(table, "2026-27", 2, preds)
-    assert check["ok"] is True, check["detail"]             # the replay is the forecast, exactly
+    check = accuracy.forecast_path_check(table, ev)
+    assert check["ok"] is True, check["detail"]             # training-table path = forecast path, exactly
+    pg = accuracy.reference_rows(ev)
+    assert (pg["predicted"] == pg["error"] + pg["actual"]).all() and "points_model" in pg

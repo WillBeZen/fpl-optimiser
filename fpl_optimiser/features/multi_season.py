@@ -11,6 +11,8 @@ with:
                  before, its square for the one before that... — for the model's
                  fit, so recent seasons count more.
   half_life      the recency half-life the form features were built with
+  earlier_season True for every season but the latest (a model input: the earlier
+                 season was filed for its top players only, so its rows differ)
 """
 from __future__ import annotations
 
@@ -57,5 +59,6 @@ def build_all(seasons: list[str] | None = None,
         tbl = build_season(season, half_life)
         tbl["sample_weight"] = config.PREV_SEASON_WEIGHT ** (latest - int(season[:4]))
         tbl["half_life"] = float(half_life)          # recorded, so a replay can show what it used
+        tbl["earlier_season"] = season != seasons[-1]   # lets the models tell last season's rows apart
         frames.append(tbl)
     return pd.concat(frames, ignore_index=True)

@@ -127,6 +127,32 @@ def availability(players: pd.DataFrame, gw: int, next_gw: int,
     return pd.Series(m.to_numpy(dtype=float), index=players["id"].to_numpy())
 
 
+def forecast_rows(model: points.PointsModel, cur, prior: pd.DataFrame | None, profiles: pd.DataFrame,
+                  as_of: int, gameweeks: list[int], players: pd.DataFrame | None = None,
+                  fixtures: pd.DataFrame | None = None, prev=None,
+                  half_life: float = config.RECENCY_HALF_LIFE_GW):
+    """The shared core of every forecast, live or replayed: one row per (player,
+    fixture in `gameweeks`) with every feature as of `as_of`'s deadline, the points
+    model's p_play / p_60 / xp, and the fixture text; plus the event model's team
+    ratings and player rates as of the same deadline. No injury flags, no blend.
+
+    `players` / `fixtures` default to the filed season's; a replay passes the players
+    as they stood at that deadline and the fixtures with later results hidden
+    (model/evaluation.py)."""
+    players = cur.players if players is None else players
+    fixtures = cur.fixtures if fixtures is None else fixtures
+    rows = build.build_prediction_table(cur.history, fixtures, players, profiles, as_of_round=as_of,
+                                        gameweeks=gameweeks, half_life=half_life, prior=prior)
+    fx = rows.join(model.predict(rows))
+    short = cur.teams.set_index("id")["short_name"]
+    fx["fixture"] = (fx["opponent_team"].map(short) + np.where(fx["was_home"], " (H)", " (A)"))
+    ratings = events.team_ratings(cur.fixtures, cur.teams, as_of, cur.history,
+                                  prev.fixtures if prev else None, prev.teams if prev else None,
+                                  half_life=half_life)
+    rates = events.player_rates(cur.history, cur.players, as_of, prior, half_life=half_life)
+    return fx, ratings, rates
+
+
 def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_GW,
              table: pd.DataFrame | None = None,
              event_weight: float = config.EVENT_MODEL_WEIGHT) -> Forecast:
@@ -142,9 +168,9 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
     gws = [g for g in range(nxt, nxt + horizon) if g <= int(cur.gameweeks["id"].max())]
 
     deadlines = dict(zip(cur.gameweeks["id"].astype(int), cur.gameweeks["deadline_time"]))
-    rows = build.build_prediction_table(cur.history, cur.fixtures, cur.players, profiles,
-                                        as_of_round=nxt, gameweeks=gws, prior=prior)
-    fx = rows.join(model.predict(rows))
+    prev_season = season_store.previous_season(season)
+    prev = season_store.load(prev_season) if prev_season in season_store.available() else None
+    fx, ratings, rates = forecast_rows(model, cur, prior, profiles, nxt, gws, prev=prev)
     fx["xp_raw"] = fx["xp"]
     unflagged = fx[["p_play", "p_60"]].copy()          # minutes before FPL's injury flags
     for gw in gws:
@@ -153,15 +179,7 @@ def forecast(season: str | None = None, horizon: int = config.PLANNING_HORIZON_G
         fx.loc[on, "xp"] = fx.loc[on, "xp_raw"] * mult
         fx.loc[on, "p_play"] = fx.loc[on, "p_play"] * mult
         fx.loc[on, "p_60"] = fx.loc[on, "p_60"] * mult
-    short = cur.teams.set_index("id")["short_name"]
-    fx["fixture"] = (fx["opponent_team"].map(short) + np.where(fx["was_home"], " (H)", " (A)"))
-
     # the event model's breakdown, and the blend the optimiser uses
-    prev_season = season_store.previous_season(season)
-    prev = season_store.load(prev_season) if prev_season in season_store.available() else None
-    ratings = events.team_ratings(cur.fixtures, cur.teams, nxt, cur.history,
-                                  prev.fixtures if prev else None, prev.teams if prev else None)
-    rates = events.player_rates(cur.history, cur.players, nxt, prior)
     fx = fx.join(events.expected_events(fx, ratings, rates))
     events_raw = events.expected_events(fx.assign(**unflagged), ratings, rates)["xp_events"]
     fx["xp_model"], fx["xp_model_raw"] = fx["xp"], fx["xp_raw"]

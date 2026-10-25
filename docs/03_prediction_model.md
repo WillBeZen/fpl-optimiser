@@ -21,7 +21,9 @@ The **points model** (gradient-boosted trees, below) predicts points directly; t
 **event model** builds them up from football events (team ratings → fixture goals →
 each player's goals, assists, clean sheets...). Each is good at something: the trees
 learn from everything in the player's record; the event model prices each fixture
-explicitly. The backtest shows the blend beats both.
+explicitly. The weight (0.5) was chosen in-sample; the honest replay
+(`docs/08_accuracy.md`) picks it walk-forward, and on this season's evidence that
+favours the event model.
 
 ## The points model: will he play, and what if he does?
 
@@ -41,9 +43,22 @@ as one blurred thing.
 ## Inputs and training
 One feature list (`model/inputs.py`) feeds both models: price at the time, recency-
 weighted form (points, minutes, xG, xA, xGI, defensive contributions, bonus, BPS,
-60-minute rate), opponent leakiness and archetype, venue, the last-season context
-columns, and position. Training uses the multi-season table (Section 2) with its
-`sample_weight`, so 2025/26 rows count half.
+60-minute rate), the opponent's recency-weighted goals conceded (and its product with
+attacking form), venue, the last-season context columns, an `earlier_season` flag, and
+position. Training uses the multi-season table (Section 2) with its `sample_weight`, so
+2025/26 rows count half.
+
+**Every input must be knowable at the deadline.** Two columns the table carries for
+the report are not inputs:
+- the opponent's "style", clustered on goals conceded over the whole season so far.
+  For a past match that includes the match itself, which leaked the result into the
+  backtest; it inflated the points model's top-11 by about 14 points a gameweek;
+- FPL's defence rating, a current snapshot, 0 for every club this season. Its only
+  signal was which season a row came from, which `earlier_season` now says explicitly.
+
+Inputs are rounded to 6 decimals (`inputs.ROUND_TO`), so the training table and the
+forecast, which compute the same features with different arithmetic, can never land a
+value on different sides of a tree split.
 
 **Gradient-boosted trees, via scikit-learn's HistGradientBoosting.** It is the LightGBM
 algorithm with native missing-value handling. LightGBM itself needs an extra system
@@ -92,34 +107,23 @@ first gameweek after that date; "Unknown return date" brings him back gradually 
 him off nor counts on him straight away. Players who have left (`u`) or aren't in the
 squad (`n`) are 0 throughout. `xp_raw` keeps the unscaled value.
 
-## Does it work? The walk-forward backtest
-`model/backtest.py`: for each gameweek *r* of 2026/27, fit on **only** what was known
-before *r* (2025/26 plus this season's earlier rounds), predict *r*, and compare with
-what happened. A test checks that no prediction ever trains on its own gameweek or
-later. Baselines anyone could compute: recency-weighted **form**, and the plain
-**season average**.
+## Does it work? The honest replay
+`model/evaluation.py` replays every finished gameweek as it stood at its deadline
+(models, features, players, prices and the planner's pool from before it only). It
+scores the blend against the points and event models and four simple baselines on the
+same player-gameweeks, with gameweek-by-gameweek uncertainty. Full method and results:
+**`docs/08_accuracy.md`**.
 
-2026/27 GW2–7, 3,941 predictions (finished matches only):
+In short (2026/27 GW2–7):
+- The models beat every simple baseline on **accuracy** (RMSE).
+- On **picking** (top 11), the blend doesn't beat a position/price baseline that uses
+  the minutes model's P(plays).
+- Walk-forward, the event model takes the whole blend.
 
-| method | RMSE | rank corr | top-11 points per GW |
-|---|---|---|---|
-| **Blend (what the planner uses)** | **2.14** | **0.66** | **56.7** |
-| Points model | 2.20 | 0.65 | 55.8 |
-| Event model | 2.13 | 0.66 | 52.8 |
-| Form (recency-weighted) | 2.25 | 0.61 | 39.3 |
-| Season average | 2.44 | 0.65 | 44.3 |
-
-The blend weight was chosen here: w = 0.5 gave the best top-11 and nearly the best
-RMSE and rank correlation (w from 0 to 1 in steps; RMSE fell steadily towards the
-event model, top-11 peaked at 0.5–0.6).
-
-*RMSE* is the typical miss per fixture (lower is better; it is the right score for an
-*expected* value). *Rank corr* is how well it orders players each week. *Top-11* is the
-real points of the 11 players each method rated highest, which is closest to what
-picking a team needs: the blend's picks scored about **17 more points per gameweek**
-than form's. The tree settings were chosen by this backtest (three candidates; the
-more regularised one won on every score). Caveat: seven gameweeks is a small sample,
-and 2025/26 contributes only its top 50 players (see Section 2).
+The earlier backtest here reported better numbers for the points model: an input
+leaked results (see Inputs above), and the blend weight and tree settings were chosen
+on the same weeks they were judged on. `model/backtest.py` (`walk_forward`) remains as
+the training-table path that the replay is checked against.
 
 ## Tests
 `tests/test_model.py`: the models learn an obvious signal (regulars play and score,

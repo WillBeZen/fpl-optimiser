@@ -196,33 +196,34 @@ def test_backtest_section_when_given():
 
 
 def test_the_full_dashboard_from_a_filed_store(two_seasons):
-    """Forecast, events and backtest from a filed store: every tab builds and renders."""
+    """Forecast, the honest replay and its checks from a filed store: every tab builds and renders."""
     from fpl_optimiser.features import multi_season
-    from fpl_optimiser.model import backtest, events, predict
+    from fpl_optimiser.model import accuracy, evaluation, predict
 
     fc = predict.forecast(horizon=3)
     table = multi_season.build_all()
-    data = events.season_data(fc.season)
-    replay = backtest.walk_forward(table, fc.season, events_data=data)
-    bt = backtest.summarise(replay)
-    from fpl_optimiser.model import accuracy
-    ids = list(replay["id"].unique())
-    halves = accuracy.half_life_check(fc.season, [2], ids, (4.0, 8.0), data, base_preds=replay)
+    ev = evaluation.run(fc.season, table)
+    bt = evaluation.backtest_table(ev)
+    halves = accuracy.half_life_check(ev, (4.0, 8.0))
     wc = squad.pick_squad(_candidates())                       # ids from elsewhere: skipped, not a crash
-    week = report.WeekResults(fc, wc, backtest=bt, table=table, replay=replay, half_lives=halves,
-                              forecast_check=accuracy.forecast_path_check(table, fc.season, 2, replay))
+    week = report.WeekResults(fc, wc, backtest=bt, table=table, evaluation=ev, half_lives=halves,
+                              forecast_check=accuracy.forecast_path_check(table, ev))
     r = report.build_report(week=week)
     ids = {s.id for s in r.sections}
     assert {"ratings", "ticker-attack", "ticker-defence", "styles"} <= ids          # fixtures tab
     assert {"m-recency", "m-matchups", "m-events", "m-blend", "backtest"} <= ids    # model tab
     assert {"explorer", "market", "glossary", "link"} <= ids
     assert {"acc-summary", "acc-gameweeks", "acc-players", "acc-calibration", "acc-halflife",
-            "acc-reconcile"} <= ids                                                 # accuracy tab
-    assert {"acc-gameweeks", "acc-scatter", "acc-calibration"} <= set(r.figures)
-    recon = next(s for s in r.sections if s.id == "acc-reconcile").blocks[0]
-    assert "✗ fail" not in recon and "The replay is exactly what the forecast would have said" in recon
+            "acc-data"} <= ids                                                      # accuracy tab
+    assert {"acc-methods", "acc-gameweeks", "acc-scatter", "acc-calibration"} <= set(r.figures)
+    checks = next(s for s in r.sections if s.id == "acc-data").blocks[0]
+    assert "✗ fail" not in checks and "Two code paths give the same predictions" in checks
+    summary = "".join(next(s for s in r.sections if s.id == "acc-summary").blocks)
+    for label in evaluation.METHODS.values():                  # every method, side by side
+        assert label in summary
+    assert "Is the blend better than each simple method?" in summary
     assert {"ratings", "m-weights", "m-prior-share", "m-response"} <= set(r.figures)
-    assert "Blend (what the planner uses)" in set(bt["method"])
+    assert evaluation.METHODS["xp_blend"] in set(bt["method"])
     page = report.render(r)
     for tab in ("week", "squad", "fixtures", "scout", "model", "accuracy", "planner", "analysis", "glossary"):
         assert f'id="tab-{tab}"' in page

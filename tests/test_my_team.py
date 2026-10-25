@@ -65,3 +65,19 @@ def test_load_uses_the_squad_a_free_hit_reverts_to(monkeypatch):
                                           + [{"id": 99, "now_cost": 50}]}, next_gw=9)
     assert "entry/123/event/7/picks" in calls
     assert team.squad_ids == [1, 2, 3] and "free hit" in team.note
+
+
+def test_squads_before_each_deadline(monkeypatch):
+    """GW3's squad is GW2's picks; GW4 follows a GW3 free hit, so it reverts to GW2's;
+    a gameweek FPL can't serve is left out."""
+    picks = {1: [1, 2], 2: [3, 4], 3: [9, 9]}
+    chips = {3: "freehit"}
+
+    def get(path, ttl_hours=None):
+        gw = int(path.split("/")[3])
+        if gw not in picks:
+            raise RuntimeError("404")
+        return {"picks": [{"element": e} for e in picks[gw]], "active_chip": chips.get(gw)}
+
+    monkeypatch.setattr(fpl_api, "_cached_get", get)
+    assert my_team.squads_before(1, [1, 2, 3, 4, 6]) == {2: [1, 2], 3: [3, 4], 4: [3, 4]}

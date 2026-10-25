@@ -580,3 +580,22 @@ def calibration_chart(cal: pd.DataFrame, theme: str = "light") -> go.Figure:
                      "Average actual points", height=420, legend_rows=2)
     fig.update_layout(**layout)
     return fig
+
+
+def method_lines(gw: pd.DataFrame, metric: str, methods: list[str], labels: dict, title: str, y_title: str,
+                 theme: str = "light") -> go.Figure:
+    """One line per method (at most four, so the colours stay distinguishable) of a
+    metric across gameweeks; the first method is the reference."""
+    t = THEMES[theme]
+    fig = go.Figure()
+    for k, m in enumerate(methods[:4]):
+        d = gw[gw["method"] == m].sort_values("round")
+        fig.add_trace(go.Scatter(
+            x=[f"GW{r}" for r in d["round"]], y=d[metric], mode="lines+markers", name=labels[m],
+            line=dict(color=t["stack"][k], width=3 if k == 0 else 2),
+            marker=dict(size=9 if k == 0 else 7, line=dict(width=2, color=t["surface"])),
+            hovertemplate=f"{labels[m]}<br>%{{x}}: %{{y:.2f}}<extra></extra>"))
+    layout = _layout(t, title, "", y_title, height=380, legend_rows=min(len(methods), 4))
+    layout["xaxis"].update(showgrid=False)
+    fig.update_layout(**layout)
+    return fig

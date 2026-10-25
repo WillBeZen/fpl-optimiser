@@ -36,7 +36,8 @@ FEATURE_LABELS = {
     "prev_minutes_per_gw": "Last season: minutes", "prev_points_per_90": "Last season: points/90",
     "prev_xgi_per_90": "Last season: xGI/90", "prev_defcon_per_90": "Last season: def. contr./90",
     "was_home": "Home", "is_cold": "Few games yet", "has_prev_season": "Has last season",
-    "prev_changed_team": "Changed club", "position": "Position",
+    "prev_changed_team": "Changed club", "earlier_season": "Row from an earlier season",
+    "position": "Position",
 }
 
 
