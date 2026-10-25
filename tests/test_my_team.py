@@ -81,3 +81,14 @@ def test_squads_before_each_deadline(monkeypatch):
 
     monkeypatch.setattr(fpl_api, "_cached_get", get)
     assert my_team.squads_before(1, [1, 2, 3, 4, 6]) == {2: [1, 2], 3: [3, 4], 4: [3, 4]}
+
+
+def test_points_history(monkeypatch):
+    """Your real points, hits and chips each gameweek, chips under config's names."""
+    history = {"current": [{"event": 1, "points": 70, "event_transfers": 0, "event_transfers_cost": 0},
+                           {"event": 2, "points": 55, "event_transfers": 2, "event_transfers_cost": 4}],
+               "chips": [{"event": 2, "name": "bboost"}]}
+    monkeypatch.setattr(fpl_api, "_cached_get", lambda path, ttl_hours=None: history)
+    h = my_team.points_history(1)
+    assert list(h["points"]) == [70, 55] and list(h["hit_cost"]) == [0, 4] and list(h["transfers"]) == [0, 2]
+    assert h["chip"].isna().iloc[0] and h["chip"].iloc[1] == "bench_boost"

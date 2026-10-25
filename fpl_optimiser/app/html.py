@@ -36,7 +36,8 @@ esc = html.escape
 OUTPUT = config.ROOT / "reports" / "fpl_report.html"
 
 TABS = [("week", "This week"), ("squad", "My squad"), ("fixtures", "Fixtures"),
-        ("scout", "Scout"), ("model", "The model"), ("accuracy", "Accuracy"), ("planner", "The planner"),
+        ("scout", "Scout"), ("model", "The model"), ("accuracy", "Accuracy"), ("decisions", "Decision test"),
+        ("planner", "The planner"),
         ("analysis", "Player analysis"), ("glossary", "Glossary")]
 HEAT_STEPS = 7
 

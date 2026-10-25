@@ -220,6 +220,12 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "average about 3.5. Shown by grouping player-gameweeks by their prediction."),
             ("Top 11 captured", "The real points of the 11 players the model rated highest each gameweek, as a "
              "share of the 11 who actually scored most (hindsight, so 100% is out of reach)."),
+            ("Decision test", "Scoring the teams each method would have picked at past deadlines on FPL's real "
+             "points, with its substitute and vice-captain rules, rather than scoring its point predictions."),
+            ("Hindsight best", "The best legal XI and captain within the budget, picked knowing every real "
+             "score: a ceiling for scale, not a target."),
+            ("Transfer gain", "In the decision test's season, the points (after hits) a method's transfers added "
+             "over keeping its first squad all along."),
             ("Data checks", "Checking the numbers against independent sources: the match records against "
              "FPL's official gameweek totals, two code paths against each other, totals added up different "
              "ways. They test the data and the method, not how good the model is."),

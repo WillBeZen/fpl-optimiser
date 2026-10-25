@@ -25,7 +25,7 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (142 tests today)
+python -m pytest -q                            # MUST stay green (150 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
@@ -78,13 +78,14 @@ fpl_optimiser/
     planner.py                multi-week MILP: transfers, banking, hits, chips   [done]
     pool.py                   drops dominated players before solving             [done]
     whatif.py                 transfer ladder, budget value, alternatives, chip grid, ... [done]
+    decisions.py              decision backtest: weekly legal teams + a season with transfers [done]
   claude/advisor.py           Claude news check -> 0-100 score (web search)     [done]
   app/
     charts.py                 Plotly figure builders (light + dark, validated palette) [done]
     html.py                   Section/Report/render, page CSS + JS, data_table   [done]
     common.py                 WeekResults, Context, shared lookups               [done]
     tab_*.py                  one module per dashboard tab (week, squad, fixtures,
-                              scout, model, accuracy, planner)                   [done]
+                              scout, model, accuracy, decisions, planner)        [done]
     report.py                 build_report: assembles the tabs (S7)              [done]
     glossary.py               the report's glossary (values read from config)    [done]
 scripts/
@@ -243,4 +244,4 @@ reports/                      generated HTML (git-ignored)
 Sections are designed one at a time (the human brings tested code/diffs from a
 planning chat). When you apply a change: put files at the paths above, run
 `pytest`, and skim edits to core modules before committing. The tests are the
-safety net — if a change would require weakening a test, stop and flag it.v
+safety net — if a change would require weakening a test, stop and flag it.

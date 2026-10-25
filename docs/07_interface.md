@@ -96,7 +96,13 @@ features, players, prices and the planner's pool from before it only):
 
 See `docs/08_accuracy.md`.
 
-**7 · The planner** — the integer program in twelve stages, with your numbers: inputs
+**7 · Decision test** — do the predictions pick better teams? A legal team every week
+from each method's predictions, scored on real points with FPL's rules (substitutes,
+vice-captain), against the hindsight-best team. Then a season with transfers and hits
+per method, next to keeping the first squad and your real team. See
+`docs/09_decision_test.md`.
+
+**8 · The planner** — the integer program in twelve stages, with your numbers: inputs
 (bought for / now / sells for, bank, free transfers, dials); the candidate pool; the
 problem's variables, rules and objective, and its size, solve time and whether it was
 proven optimal; the no-transfer baseline; **how many transfers** (each extra move's
@@ -107,10 +113,10 @@ alternatives; what's binding (clubs at the limit, formation) and **what more mon
 buy**; the objective piece by piece; captain and bench each week; and the wildcard squad
 for comparison.
 
-**8 · Player analysis.** Player types per position, attacking threat, risers and
+**9 · Player analysis.** Player types per position, attacking threat, risers and
 fallers between seasons, value, and how this season links to last (Sections 1–2).
 
-**9 · Glossary.** About 75 terms in plain English, with a filter box. Each term has an
+**10 · Glossary.** About 95 terms in plain English, with a filter box. Each term has an
 anchor (`#g-<slug>`, e.g. `#g-hit-threshold`); numbers in the definitions are read from
 `config.py`, so they always match the settings the report was built with.
 
@@ -124,7 +130,7 @@ anchor (`#g-<slug>`, e.g. `#g-hit-threshold`); numbers in the definitions are re
 - `common.py`: `WeekResults` (what the run produced) and `Context` (the filed season),
   plus shared lookups.
 - `tab_week.py`, `tab_squad.py`, `tab_fixtures.py`, `tab_scout.py`, `tab_model.py`,
-  `tab_accuracy.py`, `tab_planner.py`: one `add(report, week, ctx)` each. Each tab skips what its inputs
+  `tab_accuracy.py`, `tab_decisions.py`, `tab_planner.py`: one `add(report, week, ctx)` each. Each tab skips what its inputs
   don't support, so the page always builds.
 - `charts.py`: pure Plotly builders, light *and* dark, from a validated
   colour-blind-safe palette (three colours for scatters, four for stacked bars and

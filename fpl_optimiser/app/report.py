@@ -20,8 +20,8 @@ from datetime import datetime
 import pandas as pd
 
 import config
-from fpl_optimiser.app import (charts, glossary, tab_accuracy, tab_fixtures, tab_model, tab_planner,
-                               tab_scout, tab_squad, tab_week)
+from fpl_optimiser.app import (charts, glossary, tab_accuracy, tab_decisions, tab_fixtures, tab_model,
+                               tab_planner, tab_scout, tab_squad, tab_week)
 from fpl_optimiser.app.common import Context, WeekResults
 from fpl_optimiser.app.html import (Report, Section, card, data_table, esc, html_table, link, note,  # noqa: F401
                                     render, table)
@@ -79,6 +79,7 @@ def _add_week(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
     tab_scout.add(r, w, ctx)
     tab_model.add(r, w, ctx)
     tab_accuracy.add(r, w, ctx)
+    tab_decisions.add(r, w, ctx)
     tab_planner.add(r, w, ctx)
 
 

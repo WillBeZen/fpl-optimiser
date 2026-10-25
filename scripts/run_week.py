@@ -32,7 +32,7 @@ from fpl_optimiser.claude import advisor
 from fpl_optimiser.features import multi_season
 from fpl_optimiser.ingest import my_team, rules_check, season_store
 from fpl_optimiser.model import accuracy, evaluation, forecast_log, predict
-from fpl_optimiser.optimise import planner, squad, whatif
+from fpl_optimiser.optimise import decisions, planner, squad, whatif
 
 ADVICE_FILE = config.ROOT / "reports" / "last_advice.json"
 
@@ -43,7 +43,7 @@ def _accuracy(fc, table, team_id):
     season = season_store.load(fc.season)
     done = sorted(int(g) for g in season.gameweeks.loc[season.gameweeks["finished"] == True, "id"])  # noqa: E712
     if len(done) < 2:
-        return None, None, None
+        return None, None, None, None
     squads = my_team.squads_before(team_id, done[1:]) if team_id else {}
     ev = evaluation.run(fc.season, table, squads=squads)
     h = config.RECENCY_HALF_LIFE_GW
@@ -61,7 +61,21 @@ def _accuracy(fc, table, team_id):
     print(f"    data checks: {len(checks) - len(bad)} of {len(checks)} pass")
     for c in bad:
         print(f"      {'FAIL' if c['ok'] is False else 'info'}: {c['check']} - {c['detail']}")
-    return ev, half_lives, path_check
+
+    dec = decisions.run(ev, season)
+    if team_id:
+        try:
+            dec["actual"] = my_team.points_history(team_id)
+        except Exception:                      # FPL unavailable: no comparison with your team
+            dec["actual"] = None
+    weekly = decisions.weekly_summary(dec["picks"]).set_index("method")["points"]
+    seasons = decisions.season_summary(dec["seasons"]).set_index("method")["net"]
+    print(f"    decision test{' (cached)' if dec['cached'] else ''}: a legal team each week scores "
+          f"{weekly[evaluation.REFERENCE]:.1f} a gameweek with the blend vs {weekly['pos_price_p']:.1f} "
+          f"position/price x P(plays) (hindsight {weekly[decisions.HINDSIGHT]:.1f}); with transfers "
+          f"GW{ev.rounds[0]}-{ev.rounds[-1]}: blend {seasons[evaluation.REFERENCE]:.0f}, "
+          f"position/price x P(plays) {seasons['pos_price_p']:.0f}")
+    return ev, half_lives, path_check, dec
 
 
 def main() -> int:
@@ -161,17 +175,17 @@ def main() -> int:
         print(f"5/6 no new news check; reusing GW{fc.next_gw}'s from {advice.checked_at} UTC" if advice
               else "5/6 skipping the Claude news check")
 
-    bt = ev = half_lives = path_check = None
+    bt = ev = half_lives = path_check = dec = None
     if not args.quick:
         print("    re-checking the models: every past deadline replayed as it stood ...")
-        ev, half_lives, path_check = _accuracy(fc, table, team_id)
+        ev, half_lives, path_check, dec = _accuracy(fc, table, team_id)
         bt = evaluation.backtest_table(ev) if ev is not None else None
 
     print("6/6 writing the report ...")
     week = report.WeekResults(forecast=fc, wildcard=wildcard, plan=plan, baseline=baseline,
                               team=mine, advice=advice, backtest=bt, table=table, ladder=ladder,
                               budget=budget, chips=chip_grid, evaluation=ev, half_lives=half_lives,
-                              forecast_check=path_check)
+                              forecast_check=path_check, decisions=dec)
     out = report.build_report(fc.season, week=week).write()
 
     print()

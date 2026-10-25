@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import pandas as pd
+
 import config
 from fpl_optimiser.ingest import fpl_api
 
@@ -160,3 +162,15 @@ def squads_before(manager_id: int, gameweeks) -> dict[int, list[int]]:
         except Exception:                      # not entered yet, or FPL unavailable: no squad
             continue
     return out
+
+
+def points_history(manager_id: int) -> pd.DataFrame:
+    """Your real FPL score each gameweek (network; cached): points, transfer hits
+    and the chip played (config's name), from entry/{id}/history."""
+    get = lambda path: fpl_api._cached_get(path, ttl_hours=_TTL_H)  # noqa: E731
+    history = get(f"entry/{manager_id}/history")
+    chips = {c["event"]: FPL_CHIPS.get(c["name"], c["name"]) for c in history.get("chips", [])}
+    rows = [{"round": r["event"], "points": r.get("points", 0), "hit_cost": r.get("event_transfers_cost", 0),
+             "transfers": r.get("event_transfers", 0), "chip": chips.get(r["event"])}
+            for r in history.get("current", [])]
+    return pd.DataFrame(rows, columns=["round", "points", "hit_cost", "transfers", "chip"])

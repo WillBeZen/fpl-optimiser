@@ -40,6 +40,7 @@ class WeekResults:
     evaluation: object | None = None       # model.evaluation.run(...): every past deadline replayed
     half_lives: pd.DataFrame | None = None # model.accuracy.half_life_check(...)
     forecast_check: dict | None = None     # model.accuracy.forecast_path_check(...)
+    decisions: dict | None = None          # optimise.decisions.run(...) (+ "actual": your real points)
     chips: pd.DataFrame | None = None      # optimise.whatif.chip_weeks(...)
 
 
