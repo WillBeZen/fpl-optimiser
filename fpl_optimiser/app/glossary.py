@@ -72,8 +72,9 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "rise since, rounded down to £0.1m; a fall is taken in full. Bought at £5.5m, now "
              "£6.2m: sells for £5.8m."),
             ("Chips", f"One-off boosts: wildcard, free hit, bench boost and triple captain. You get "
-             f"{config.CHIP_SETS_PER_SEASON} sets a season, and the first set must be used by the "
-             f"GW{config.CHIP_SPLIT_GW} deadline. The planner doesn't plan chips yet."),
+             f"{config.CHIP_SETS_PER_SEASON} sets a season: the first must be used by the "
+             f"GW{config.CHIP_SPLIT_GW} deadline, the second after it. The planner decides which "
+             "gameweek (if any) to play each one in, one chip a week at most."),
             ("Wildcard", "Unlimited free transfers for one gameweek, and you keep the new squad. "
              "'Best squad from scratch' is what a wildcard would build."),
             ("Free hit", "Unlimited free transfers for one gameweek only; your squad goes back to "
@@ -181,8 +182,13 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
             ("Candidate pool", "The players given to the solver: anyone who could be optimal. A player is "
              "left out when several others at his position cost no more and score at least as much "
              "every week."),
+            ("Chip threshold", "A chip is only played if it gains more than its threshold, in that "
+             "gameweek's expected points: " + ", ".join(
+                 f"{name.replace('_', ' ')} {pts:g}" for name, pts in config.CHIP_THRESHOLD_POINTS.items())
+             + ". It's what the chip should be worth if saved for a better week. A chip about to "
+             "expire is worth nothing saved, so it's used in its best remaining week."),
             ("Objective", "The single number the planner maximises: decayed XI, captain and bench points, "
-             "minus the hit penalty, plus the value of transfers still banked."),
+             "minus the hit penalty and chip thresholds, plus the value of transfers still banked."),
             ("Transfer ladder", "The best plan with exactly 0, 1, 2, ... transfers this week: what each "
              "extra move is worth, and whether a hit pays."),
             ("Money freed", "What a sale raises minus what its replacement costs: money another move can use."),

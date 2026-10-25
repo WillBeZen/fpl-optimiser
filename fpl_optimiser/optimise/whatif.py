@@ -13,10 +13,15 @@ alternatives were:
                     points week by week
   constraint_use    which rules are binding: clubs at their 3-player limit, money left
   objective_parts   the number the solver maximised, split into its pieces
+  chip_weeks        each chip still available played in each gameweek it's allowed:
+                    what it would add over the plan without chips, and the threshold
+                    it must beat
 
 Every what-if re-solves the same integer program with one thing changed, so the
-answers are exact for the model, not estimates. The solver (CBC) runs as its own
-process, so the re-solves run side by side in threads.
+answers are exact for the model, not estimates. The ladder and budget what-ifs keep
+the plan's chips where the plan plays them (hold_chips), so they ask only about
+transfers and money (and need no chip decisions, which keeps them fast). The solver
+(CBC) runs as its own process, so the re-solves run side by side in threads.
 """
 from __future__ import annotations
 
@@ -46,10 +51,17 @@ def _plans(inputs: dict, changes: list[dict]) -> list[planner.Plan | None]:
 
 
 def plan_inputs(xp: pd.DataFrame, players: pd.DataFrame, squad_ids: list[int], bank: float,
-                free_transfers: int, sell_prices: dict[int, float] | None = None) -> dict:
+                free_transfers: int, sell_prices: dict[int, float] | None = None,
+                chips: dict | None = None) -> dict:
     """The planner's arguments, bundled so each what-if can change just one."""
     return dict(xp=xp, players=players, squad_ids=list(squad_ids), bank=bank,
-                free_transfers=free_transfers, sell_prices=sell_prices or {})
+                free_transfers=free_transfers, sell_prices=sell_prices or {}, chips=chips)
+
+
+def hold_chips(inputs: dict, p: planner.Plan) -> dict:
+    """The same inputs with the chips fixed where plan `p` plays them (and no others)."""
+    return {**inputs, "chips": {(gw, gw): (chip,) for chip, gw in p.chips.items()} or None,
+            "play_chips": dict(p.chips) or None}
 
 
 def _moves(week: planner.Week) -> tuple[str, str]:
@@ -174,19 +186,54 @@ def objective_parts(p: planner.Plan, decay: float = config.HORIZON_DECAY,
                     hit_penalty: float = config.HIT_THRESHOLD_POINTS,
                     ft_value: float = config.FREE_TRANSFER_VALUE) -> pd.DataFrame:
     """The solver's objective, piece by piece: each gameweek's XI, captain and bench
-    (weighted by horizon decay), minus the hit penalty, plus banked transfers."""
+    (weighted by horizon decay; a chip's week as the chip scores it), minus the hit
+    penalty and the thresholds of the chips played, plus banked transfers."""
     rows = []
     for k, w in enumerate(p.weeks):
         team = w.team
         xi = team.loc[team["role"] == "XI", "xp"].sum()
         cap = team.loc[team["captain"], "xp"].sum()
         bench = team.loc[team["role"] == "bench", "xp"].sum()
+        again = (config.TRIPLE_CAPTAIN_MULTIPLIER if w.chip == "triple_captain" else config.CAPTAIN_MULTIPLIER) - 1
+        bench_counts = 1.0 if w.chip == "bench_boost" else bench_weight
         weight = decay ** k
-        rows.append({"part": f"GW{w.gw}", "weight": weight, "xi": xi, "captain": cap,
-                     "bench": bench, "value": weight * (xi + cap + bench_weight * bench)})
+        rows.append({"part": f"GW{w.gw}" + (f" · {planner.CHIP_NAMES[w.chip]}" if w.chip else ""), "weight": weight,
+                     "xi": xi, "captain": again * cap, "bench": bench,
+                     "value": weight * (xi + again * cap + bench_counts * bench)})
     hits = sum(w.hits for w in p.weeks)
     rows.append({"part": "Hits", "weight": None, "xi": None, "captain": None, "bench": None,
                  "value": -hit_penalty * hits})
+    if p.chips:
+        rows.append({"part": "Chip thresholds", "weight": None, "xi": None, "captain": None, "bench": None,
+                     "value": -p.chip_charge})
     rows.append({"part": "Banked transfers", "weight": None, "xi": None, "captain": None, "bench": None,
                  "value": ft_value * p.free_end})
     return pd.DataFrame(rows)
+
+
+def chip_weeks(inputs: dict, base: planner.Plan | None = None, chosen: planner.Plan | None = None,
+               decay: float = config.HORIZON_DECAY,
+               threshold: dict[str, float] = config.CHIP_THRESHOLD_POINTS) -> pd.DataFrame:
+    """Each chip still available (inputs["chips"]) played in each gameweek it's allowed,
+    alone, with everything else re-planned around it, against the plan without chips
+    (`base`). One row per (chip, gameweek):
+
+      gain       the change in the planner's objective (decayed points, hits weighed)
+      xp_gain    the change in expected points over the horizon, after hits
+      must_beat  the threshold it must clear that week (planner.chip_charge)
+      worth      gain > must_beat;  planned: the plan `chosen` plays it there"""
+    base = base or _plan({**inputs, "chips": None})
+    gws = sorted(inputs["xp"]["gw"].unique())
+    cells = [(chip, int(gw), window) for window, names in (inputs.get("chips") or {}).items()
+             for chip in names for gw in gws if window[0] <= gw <= window[1]]
+    changes = [{"chips": {(gw, gw): (chip,)}, "play_chips": {chip: gw}} for chip, gw, _ in cells]
+    rows = []
+    for (chip, gw, window), p in zip(cells, _plans(inputs, changes)):
+        if p is None:
+            continue
+        bar = planner.chip_charge(chip, gws.index(gw), window, gws, decay, threshold)
+        gain = p.objective - base.objective
+        rows.append({"chip": chip, "gw": gw, "set": f"GW{window[0]}-{window[1]}", "gain": gain,
+                     "xp_gain": p.net - base.net, "must_beat": bar, "worth": gain > bar,
+                     "planned": chosen is not None and chosen.chips.get(chip) == gw})
+    return pd.DataFrame(rows, columns=["chip", "gw", "set", "gain", "xp_gain", "must_beat", "worth", "planned"])

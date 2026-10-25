@@ -167,6 +167,9 @@ def brief(week, players, deadline: str | None = None, baseline_xp: float | None 
         lines.append(f"Free transfers available: {week.free_transfers}; hits taken: {week.hits}.")
     else:
         lines.append(f"No transfers this week: bank the free transfer ({week.free_transfers} available).")
+    chip = getattr(week, "chip", None)
+    if chip:
+        lines.append(f"Chip: the plan plays the {chip.replace('_', ' ')} this gameweek.")
     if plan_xp is not None and baseline_xp is not None:
         lines.append(f"Expected points over the planning horizon: {plan_xp:.1f} with this plan "
                      f"(minus {hits_cost} for hits) vs {baseline_xp:.1f} making no transfers.")

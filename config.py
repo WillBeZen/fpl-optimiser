@@ -114,6 +114,22 @@ HORIZON_DECAY = 0.9
 # any tiny gain, because the plan can't see the flexibility it throws away.
 FREE_TRANSFER_VALUE = 1.5
 
+# Chip thresholds (Section 5). The planner plays a chip only if it gains more than
+# this over the same plan without it, in that gameweek's expected points (the plan
+# decays both alike, so a double gameweek a month away can still earn the chip). It
+# is the chip's opportunity value: roughly what it should be worth if saved for a
+# better week (a double or blank gameweek). A bench boost gains your bench's points, a
+# triple captain one more of your captain's, a wildcard or free hit the better squad it
+# buys without hits. Not charged when the chip's set expires within the horizon (the
+# first set does after CHIP_SPLIT_GW): it's worth nothing afterwards, so the plan uses
+# it in its best remaining week, however small the gain. Higher = save chips for bigger weeks.
+CHIP_THRESHOLD_POINTS = {
+    "wildcard": 20.0,         # about a season-changing restructure
+    "free_hit": 15.0,         # a blank or double gameweek fixes far more than one week
+    "bench_boost": 12.0,      # a normal bench expects ~8-10; a double gameweek's ~15-20
+    "triple_captain": 10.0,   # a normal premium captain expects ~7-9; a double ~12-15
+}
+
 # Event-model weight (Section 3). The expected points the optimiser uses are a blend:
 # (1 - w) x the points model (gradient-boosted trees) + w x the event model (team
 # ratings -> fixture goals -> each player's goals, assists, clean sheets...). In the
@@ -209,6 +225,10 @@ def validate() -> None:
     assert 0 < HORIZON_DECAY <= 1
     assert 0 <= BENCH_WEIGHT < 1
     assert FREE_TRANSFER_VALUE >= 0
+    assert CHIP_SETS_PER_SEASON in (1, 2), "chip sets are split at one gameweek (CHIP_SPLIT_GW)"
+    assert 1 <= CHIP_SPLIT_GW < GAMEWEEKS_IN_SEASON
+    assert set(CHIP_THRESHOLD_POINTS) == set(CHIPS), "one chip threshold per chip"
+    assert all(v >= 0 for v in CHIP_THRESHOLD_POINTS.values())
     assert 0 <= EVENT_MODEL_WEIGHT <= 1
     assert all(0 <= x <= 1 for x in UNKNOWN_RETURN_RAMP)
     assert PREV_SEASON_GAP_GW >= 0

@@ -85,8 +85,8 @@ reports/                   the generated HTML report  (git-ignored)
 
 ## Build status
 
-Sections 0–7 are built and tested. Next: chip planning, and the full 2025/26 match
-data from a public archive (see the charter's "What's next").
+Sections 0–7 are built and tested, chip planning included. Next: the full 2025/26
+match data from a public archive (see the charter's "What's next").
 
 ## Running data pulls
 

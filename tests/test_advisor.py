@@ -142,3 +142,10 @@ def test_a_successful_check_is_saved_and_reused_only_for_its_gameweek(tmp_path):
     assert advisor.load(tmp_path / "missing.json", 9) is None
     path.write_text("not json")
     assert advisor.load(path, 9) is None
+
+
+def test_brief_names_a_chip_played_this_week():
+    week = _week()
+    week.chip = "bench_boost"
+    assert "Chip: the plan plays the bench boost this gameweek." in advisor.brief(week, PLAYERS)
+    assert "Chip:" not in advisor.brief(_week(), PLAYERS)
