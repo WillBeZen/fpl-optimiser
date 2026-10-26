@@ -14,16 +14,19 @@ fc.per_fixture                   # one row per player x fixture, with the event 
 The expected points the optimiser uses blend two models:
 
 ```
-xp = (1 - w) x points model + w x event model        w = config.EVENT_MODEL_WEIGHT (0.5)
+xp = (1 - w) x points model + w x event model        w = config.EVENT_MODEL_WEIGHT (0.65)
 ```
 
 The **points model** (gradient-boosted trees, below) predicts points directly; the
 **event model** builds them up from football events (team ratings → fixture goals →
 each player's goals, assists, clean sheets...). Each is good at something: the trees
 learn from everything in the player's record; the event model prices each fixture
-explicitly. The weight (0.5) was chosen in-sample; the honest replay
-(`docs/08_accuracy.md`) picks it walk-forward, and on this season's evidence that
-favours the event model.
+explicitly. The weight (0.65) and the recency half-life (4 gameweeks) are chosen on
+last season by rules fixed in advance, then checked on this season
+(`scripts/study_last_season.py`, `docs/08_accuracy.md`). On last season's 37 gameweeks
+any weight from 0.5 to 0.75 predicts almost equally well. The blend is more accurate
+than the points model alone, level with the event model, and better than every simple
+method.
 
 ## The points model: will he play, and what if he does?
 

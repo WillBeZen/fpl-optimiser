@@ -136,9 +136,10 @@ class Season:
 
 
 def _xi_for(team_ids: list[int], players_r: pd.DataFrame, xp: pd.Series) -> squad.Squad:
-    """The best XI, captain and vice from a fixed 15 (budget irrelevant)."""
+    """The best XI, captain and vice from a fixed 15. Neither the budget nor the club
+    limit applies: a player's move between clubs can leave a kept squad with four."""
     c = candidates(players_r[players_r["id"].isin(team_ids)], xp)
-    return squad.pick_squad(c, budget=1e9)
+    return squad.pick_squad(c, budget=1e9, max_per_club=config.SQUAD_SIZE)
 
 
 def simulate(ev, cur, method: str, horizon_decay: float = config.HORIZON_DECAY) -> Season:

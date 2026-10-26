@@ -25,7 +25,7 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (150 tests today)
+python -m pytest -q                            # MUST stay green (163 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
@@ -54,6 +54,7 @@ fpl_optimiser/
     understat.py              Understat plain-HTTP (PPDA) — a backend, often blocked [done]
     team_map.py               FPL<->source team-name reconciliation              [done]
     my_team.py                your squad, bank, free transfers, selling prices, chips left [done]
+    archive.py                earlier seasons' match records from a public archive, checked vs FPL [done]
     rules_check.py            config.py vs FPL's published rules                 [done]
   features/
     recency.py                exponential decay weighting                        [done]
@@ -72,6 +73,7 @@ fpl_optimiser/
     explain.py                numbers behind the report's "The model" tab        [done]
     evaluation.py             THE honest replay: every past deadline as it stood, all methods [done]
     accuracy.py               accuracy views + data checks on the replay        [done]
+    tuning.py                 half-life + blend weight chosen on last season, checked on this one [done]
     forecast_log.py           files each run's next-gameweek forecast            [done]
   optimise/
     squad.py                  single-gameweek MILP: 15, XI, captain, vice        [done]
@@ -91,6 +93,8 @@ fpl_optimiser/
 scripts/
   run_week.py                 the weekly run (everything, one command)
   pull_fpl.py                 files the live season (polite, resumable)
+  pull_archive.py             downloads + checks last season's full match records (once)
+  study_last_season.py        chooses the half-life + blend weight on last season (~20 min, once)
   build_features.py           builds the multi-season training table
   make_report.py              writes reports/fpl_report.html
   verify_setup.py             environment + live-source health check
@@ -131,7 +135,10 @@ reports/                      generated HTML (git-ignored)
   player data incl. per-player **xG/xA and CBIT defensive stats**, fixtures with
   FDR, and squads. No scraping needed for players.
 - The live API serves **only the current season**. 2025/26 is frozen in the store
-  (season totals for all 841 players; per-match history for the top 50 only).
+  (season totals for all 841 players; FPL's per-match history for the top 50 only).
+  Every other 2025/26 player's match records come from the public archive
+  `vaastav/Fantasy-Premier-League` (`ingest/archive.py`, `data/raw/archive/`), pinned to
+  a commit and checked against FPL's records and season totals before use.
 - **Opponent (team) stats** come through the `opponent_stats` adapter:
   - `fpl` (default) — goals conceded from the season's filed FPL results; no browser.
   - `fbref` — via `soccerdata`, which drives **headless Chrome**. Its `schedule()`
@@ -207,9 +214,19 @@ reports/                      generated HTML (git-ignored)
   (`model/inputs.py`). Never add a feature built from season-level or current snapshots.
 - **Two code paths, one answer:** numeric inputs are rounded (`inputs.ROUND_TO`) so the
   training table and the forecast can't put a value on different sides of a tree split.
-- **Evaluate honestly** with `model/evaluation.py` (pools, prices, features, blend
-  weight all as of each deadline). Don't tune a setting on the weeks you then quote as
-  evidence; `EVENT_MODEL_WEIGHT` (0.5) was, and is flagged as in-sample.
+- **Evaluate honestly** with `model/evaluation.py` (pools, prices, features all as of
+  each deadline). Don't tune a setting on the weeks you then quote as evidence. The
+  reference is the planner's own blend (`xp_blend`, at `EVENT_MODEL_WEIGHT`), honest
+  because that weight is chosen on last season; `blend_wf` re-chooses it each week.
+- **Settings are chosen on last season** (`model/tuning.py`, `scripts/study_last_season.py`):
+  the half-life and `EVENT_MODEL_WEIGHT` come from replaying 2025/26 by rules fixed before
+  looking, then are checked on this season. Re-run the study after changing the model;
+  don't hand-tune them on this season's weeks.
+- **The archive repeats rows**: 2025/26's `merged_gw.csv` has 10 exact duplicates (one
+  player's GW1-9 twice). `archive.parse_merged_gw` drops exact repeats; the season-totals
+  check catches any other drift.
+- **Avoid Python lambdas in big groupbys**: `evaluation.player_gameweeks` used one per
+  method and took 42 s on a season's 29,000 rows (0.1 s vectorised).
 - **The accuracy replay can't apply past injury flags** (FPL doesn't archive them);
   `forecast_log` files each week's real forecast so later weeks can compare it.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your
@@ -236,7 +253,8 @@ reports/                      generated HTML (git-ignored)
 - [x] Event model + blend (backtested), return dates from injury news, planner what-ifs
 - [x] **Chips** — wildcard / free hit / bench boost / triple captain planned in planner.py
       (thresholds `CHIP_THRESHOLD_POINTS`, the GW19 split, a chip × gameweek what-if).
-- [ ] **Full 2025/26 match data** from a public archive (only the top 50 were filed).
+- [x] **Full 2025/26 match data** from a public archive, checked against FPL; the
+      half-life and blend weight chosen on it and checked on 2026/27.
 - [ ] Richer opponent stats (team xGA, PPDA) if a source becomes reachable.
 
 ## Working style

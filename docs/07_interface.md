@@ -84,23 +84,28 @@ blend and FPL's flags (who they cut); and the walk-forward backtest of every met
 
 **6 · Accuracy** — every finished gameweek replayed as it stood at its deadline (models,
 features, players, prices and the planner's pool from before it only):
-- every method side by side, for the planner's pool and for every player: the blend,
-  each model alone, and four simple baselines;
+- every method side by side, for the planner's pool and for every player: the
+  planner's blend, the blend re-weighted each week, each model alone, and four simple
+  baselines;
 - **whether the blend beats each one**, gameweek by gameweek with 90% intervals;
-- each method gameweek by gameweek, and the blend's walk-forward weight;
+- each method gameweek by gameweek, and the re-weighted blend's weight each week;
 - every pool player's predicted and actual points over the last `ACCURACY_WINDOW_GW`
   gameweeks, shaded by over- or under-prediction;
 - player totals, calibration, and accuracy by position and by scoring source;
 - the biggest misses, the half-life check, and the logged deadline forecasts;
-- **data checks**, kept separate because they test the data, not the model.
+- **last season**, replayed the same way over 37 gameweeks: the methods, the half-life
+  and weight chosen there (`scripts/study_last_season.py`), and their check on this
+  season;
+- **data checks**, kept separate because they test the data, not the model, including
+  last season's match archive against FPL's own records.
 
 See `docs/08_accuracy.md`.
 
 **7 · Decision test** — do the predictions pick better teams? A legal team every week
 from each method's predictions, scored on real points with FPL's rules (substitutes,
 vice-captain), against the hindsight-best team. Then a season with transfers and hits
-per method, next to keeping the first squad and your real team. See
-`docs/09_decision_test.md`.
+per method, next to keeping the first squad and your real team. Plus the same two
+tests on last season (37 gameweeks). See `docs/09_decision_test.md`.
 
 **8 · The planner** — the integer program in twelve stages, with your numbers: inputs
 (bought for / now / sells for, bank, free transfers, dials); the candidate pool; the

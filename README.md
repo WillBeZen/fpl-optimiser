@@ -44,7 +44,7 @@ scratch, just no personal transfer plan or news check.
 ### First time
 1. Set up as above (Python 3.11+; tested on 3.13), then check everything works:
    ```bash
-   python -m pytest -q              # 150 offline tests, about three minutes; never touches the network
+   python -m pytest -q              # 163 offline tests, about 90 seconds; never touches the network
    python config.py                 # prints "config OK"
    python scripts/verify_setup.py   # live check: FPL reachable, opponent source, rules match FPL's
    python scripts/check_claude.py   # optional: one tiny Claude request (a fraction of a cent)
@@ -111,12 +111,18 @@ planner** (every stage), **Player analysis** and a **Glossary**. Every table sor
 python scripts/pull_fpl.py                  # just refresh the filed season (--limit N for a quick test)
 python scripts/build_features.py            # just build the multi-season training table
 python scripts/make_report.py --open        # the analysis-only report (no plan, no Claude)
+python scripts/pull_archive.py              # once: last season's full match records (5.4 MB), checked vs FPL
+python scripts/study_last_season.py         # once a season: choose the half-life + blend weight (~20 min)
 ```
 
 ### Tuning
 Every rule and strategy dial is in `config.py` (half-life, planning horizon, hit
-threshold, horizon decay, bench weight, event-model weight, chip thresholds, ...). Change
-one, re-run, and compare the backtest on the dashboard's **The model** tab.
+threshold, horizon decay, bench weight, event-model weight, chip thresholds, ...). The
+half-life and the event-model weight are chosen on last season by
+`scripts/study_last_season.py` (rules fixed in advance, then checked on this season; the
+**Accuracy** tab shows the evidence), so they aren't tuned on the weeks they're judged
+on. For the other dials: change one, re-run, and compare on the **Accuracy** and
+**Decision test** tabs.
 
 ## Layout
 
@@ -124,26 +130,28 @@ one, re-run, and compare the backtest on the dashboard's **The model** tab.
 config.py                  all FPL rules + tunable dials  (start here)
 fpl_optimiser/
   ingest/                  Section 1 — FPL API, season store, cross-season links,
-                           your team, rules check, opponent stats
+                           your team, rules check, opponent stats, the match archive
   features/                Section 2 — recency, opponent archetypes, training table,
                            last-season prior, multi-season table, player types
   model/                   Section 3 — minutes + points models, event model, backtest,
-                           forecasts, explainers
-  optimise/                Sections 4–5 — squad MILP, multi-week planner, pool, what-ifs
+                           forecasts, explainers, the honest replay, accuracy, tuning
+  optimise/                Sections 4–5 — squad MILP, multi-week planner, pool, what-ifs,
+                           the decision test
   claude/                  Section 6 — the Claude news check
   app/                     Section 7 — charts + the tabbed HTML dashboard
 scripts/                   run_week (weekly), pull_fpl, build_features, make_report, verify_setup,
-                           check_claude
+                           check_claude, pull_archive, study_last_season
 docs/                      one plain-English write-up per section
 tests/                     offline: mock payloads and tiny synthetic seasons, never the network
-data/                      raw (filed seasons) / processed / cache  (git-ignored)
+data/                      raw (filed seasons, the archive) / processed / cache  (git-ignored)
 reports/                   the generated HTML report  (git-ignored)
 ```
 
 ## Build status
 
-Sections 0–7 are built and tested, chip planning included. Next: the full 2025/26
-match data from a public archive (see the charter's "What's next").
+Sections 0–7 are built and tested, chip planning included, with an honest evaluation
+harness, a decision test, and last season's full match data (from a public archive,
+checked against FPL) on which the half-life and the blend's weight are chosen.
 
 ## Running data pulls
 

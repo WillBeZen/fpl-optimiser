@@ -74,7 +74,7 @@ def _first_week():
                          "minutes": 90 if act else 0, "p_play": 0.9, "trained_to": r - 1,
                          "event_weight": 0.5, "in_pool": pid != 3,
                          "xp_blend": act + ref_err, "xp": act + 1.0, "xp_events": act - 1.0 + 2 * ref_err,
-                         "blend_cfg": act + ref_err, "pos_price_p": 3.0, "pos_price": 2.0, "ewma": act / 2,
+                         "blend_wf": act + ref_err, "pos_price_p": 3.0, "pos_price": 2.0, "ewma": act / 2,
                          "season_avg": 2.0})
     return pd.DataFrame(rows)
 
@@ -111,7 +111,7 @@ def test_a_replay_on_a_filed_store(two_seasons):
     assert ev.pools[2] and fw["in_pool"].any() and set(ev.horizons[2]["round"]) == {2, 3}
     assert (fw["half_life"] == config.RECENCY_HALF_LIFE_GW).all()
     with pytest.raises(ValueError, match="half-life"):
-        evaluation.run(table=table.assign(half_life=4.0), horizon=1)
+        evaluation.run(table=table.assign(half_life=config.RECENCY_HALF_LIFE_GW * 2), horizon=1)
 
 
 def test_model_inputs_are_all_knowable_at_the_deadline():

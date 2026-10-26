@@ -21,13 +21,14 @@ gameweeks ago by
 weight = 0.5 ** (g / half_life)
 ```
 
-`half_life` (default `config.RECENCY_HALF_LIFE_GW = 8`) is the number of gameweeks
+`half_life` (default `config.RECENCY_HALF_LIFE_GW = 4`) is the number of gameweeks
 at which a match counts **half** as much as the most recent one. Worked example
-with half-life 8: last week ≈ 0.92, four weeks ago ≈ 0.71, eight weeks ago = 0.50,
-sixteen ago = 0.25. A player's "form xGI" is then a weighted average of his
+with half-life 4: last week ≈ 0.84, two weeks ago ≈ 0.71, four weeks ago = 0.50,
+eight ago = 0.25. A player's "form xGI" is then a weighted average of his
 per-match xGI using those weights — a smooth, recency-biased number rather than a
 flat season average. Lower the half-life to chase hot streaks; raise it to trust
-the longer record. (Section 3's backtest is how you'll tune it, not guesswork.)
+the longer record. It is chosen on last season, not by guesswork: 4 beat 6, 8, 12 and
+16 on accuracy over 2025/26's 37 gameweeks (`docs/08_accuracy.md`).
 
 ## 2. Opponent characteristics + archetypes (`features/opponent.py`)
 
@@ -112,9 +113,11 @@ row's form as if it had been played just before GW1: its 38 gameweeks at the
 player's per-gameweek averages, ending `config.PREV_SEASON_GAP_GW` gameweeks
 (default 8, standing in for the summer break) before GW1. So at GW1 his form *is*
 last season's average, and as this season's (more recent) matches arrive their
-weight takes over. With half-life 8 and gap 8, last season counts like ~5 recent
-matches at GW1, ~2 by GW10 and under 1 by GW20. Raise the gap to trust last season
-less. `weighted_form_asof(..., prior=...)` is the readable definition (it literally
+weight takes over. With half-life 4 and gap 8, last season counts like ~1.6 recent
+matches at GW1, ~0.3 by GW10 and almost nothing by GW20: about 30% of a player's form
+weight at GW4 and 7% at GW10. (At the old half-life of 8 it was 64% and 31%; the check
+of the new half-life on 2026/27 GW2–7, the weeks this matters most, found it more
+accurate.) Raise the gap to trust last season less. `weighted_form_asof(..., prior=...)` is the readable definition (it literally
 appends the virtual matches); the table builder uses the equivalent closed form, and
 a test checks they agree.
 
@@ -137,12 +140,10 @@ stacks them with `season`, `code` and `sample_weight`: 1 for the latest season,
 `config.PREV_SEASON_WEIGHT` (0.5) for the one before, its square for two back.
 Section 3 passes `sample_weight` to the model so recent seasons count more.
 
-**Coverage caveat:** the 2025/26 per-match rows exist only for the 50 players fetched
-before the API moved on, and they are the season's top scorers, a biased sample. The
-2025/26 *season totals* cover all 841 players, which is what the prior uses. Full
-2025/26 match-by-match data would need a public archive (for example the
-`vaastav/Fantasy-Premier-League` repository); the season store can take it as
-another source.
+**Coverage:** FPL's own 2025/26 per-match files cover only the 50 players fetched
+before the API moved on, the season's top scorers: a biased sample. The match archive
+(`docs/01_data_ingestion.md`) fills in the other 791, so the training table's 2025/26
+rows (29,747) cover the whole league. The prior still uses season totals.
 
 ## 6. Player types for visual analysis (`features/player_profiles.py`)
 

@@ -14,7 +14,10 @@ ids every season. So each season's raw JSON is filed into its own folder:
   (GW1's deadline), never assumed. It is resumable: player files younger than
   `ttl_hours` are kept rather than re-fetched.
 - `freeze()` marks a finished season read-only; `pull_live()` refuses to touch it.
-- `load()` reads a filed season back as tidy tables for the feature code.
+- `load()` reads a filed season back as tidy tables for the feature code. For a
+  season FPL's files cover only in part (2025/26: match records for the top 50),
+  it fills in every other player's match records from the season's archive file
+  (ingest/archive.py), if downloaded.
 
 Players are linked ACROSS seasons by their permanent `code` (see player_link.py).
 """
@@ -28,6 +31,7 @@ from pathlib import Path
 import pandas as pd
 
 import config
+from fpl_optimiser.ingest import archive as _archive
 from fpl_optimiser.ingest import fpl_api
 
 STORE = config.RAW_DIR / "fpl"
@@ -43,7 +47,8 @@ class Season:
     teams: pd.DataFrame        # fpl_api.parse_teams
     fixtures: pd.DataFrame     # fpl_api.parse_fixtures
     gameweeks: pd.DataFrame    # fpl_api.parse_gameweeks
-    history: pd.DataFrame      # per-match rows for every filed player, with `id` (finished matches)
+    history: pd.DataFrame      # per-match rows with `id` (finished matches): FPL's files, then an
+                               # archive's for players they don't cover
     past: pd.DataFrame         # element-summary history_past: earlier seasons' totals, with `id`
     pending: pd.DataFrame = field(default_factory=pd.DataFrame)   # match rows not finished yet
     live: pd.DataFrame = field(default_factory=pd.DataFrame)      # official points per finished GW
@@ -163,10 +168,11 @@ def pull_live(limit: int | None = None, ttl_hours: float = 12.0, pause_s: float 
 # --------------------------------------------------------------------------- #
 # Reading a filed season back
 # --------------------------------------------------------------------------- #
-def assemble(season: str, bootstrap: dict, fixtures: list,
-             summaries: dict[int, dict], live: dict[int, dict] | None = None) -> Season:
+def assemble(season: str, bootstrap: dict, fixtures: list, summaries: dict[int, dict],
+             live: dict[int, dict] | None = None, archive: pd.DataFrame | None = None) -> Season:
     """Pure: raw payloads -> a Season of tidy tables (`summaries` keyed by player id,
-    `live` by gameweek)."""
+    `live` by gameweek). `archive` (archive.parse_merged_gw) adds the match records
+    of every player without a summary."""
     teams = fpl_api.parse_teams(bootstrap)
 
     def stack(key: str) -> pd.DataFrame:
@@ -175,7 +181,12 @@ def assemble(season: str, bootstrap: dict, fixtures: list,
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     parsed = fpl_api.parse_fixtures(fixtures, teams)
-    played, pending = split_played(stack("history"), parsed)
+    history = stack("history")
+    if archive is not None and len(archive):
+        extra = archive[~archive["id"].isin(set(summaries))]
+        history = (pd.concat([history, extra], ignore_index=True) if len(history) else extra)
+        history = history.sort_values(["id", "kickoff_time", "fixture"], kind="stable").reset_index(drop=True)
+    played, pending = split_played(history, parsed)
     frames = [fpl_api.parse_event_live(p, gw) for gw, p in sorted((live or {}).items())]
     return Season(season=season, bootstrap=bootstrap,
                   players=fpl_api.parse_players(bootstrap), teams=teams, fixtures=parsed,
@@ -217,8 +228,13 @@ def load_fixtures(season: str, root: Path | None = None) -> pd.DataFrame:
                                   fpl_api.parse_teams(bootstrap))
 
 
-def load(season: str, root: Path | None = None) -> Season:
-    """Read a filed season. Refuses a folder whose data is from another season."""
+def load(season: str, root: Path | None = None, archive: Path | bool | None = None) -> Season:
+    """Read a filed season. Refuses a folder whose data is from another season.
+
+    `archive`: the folder of archive files (ingest/archive.py) to fill in players FPL's
+    files don't cover. By default the real one for the real store, and none for any
+    other (a test's, whether passed as `root` or patched into STORE); False reads FPL's
+    own files only."""
     d = season_dir(season, root)
     bootstrap = json.loads((d / "bootstrap-static.json").read_text())
     if season_of(bootstrap) != season:
@@ -226,4 +242,8 @@ def load(season: str, root: Path | None = None) -> Season:
     summaries = {int(f.stem.split("_")[1]): json.loads(f.read_text())
                  for f in d.glob("element-summary_*.json")}
     live = {int(f.stem.split("_")[1]): json.loads(f.read_text()) for f in d.glob("event-live_*.json")}
-    return assemble(season, bootstrap, json.loads((d / "fixtures.json").read_text()), summaries, live)
+    real_store = (STORE if root is None else root) == config.RAW_DIR / "fpl"
+    if archive is None or archive is True:
+        archive = _archive.ARCHIVE if real_store or archive is True else False
+    extra = _archive.load(season, archive) if archive is not False else None
+    return assemble(season, bootstrap, json.loads((d / "fixtures.json").read_text()), summaries, live, extra)

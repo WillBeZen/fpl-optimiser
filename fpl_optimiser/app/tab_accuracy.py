@@ -15,6 +15,8 @@ gameweeks as the unit of evidence.
   breakdown      by position, and by scoring source against FPL's own breakdown
   misses         the biggest misses
   half-life      the same deadlines replayed with a shorter and a longer half-life
+  last season    last season replayed the same way: firmer evidence, and where the
+                 half-life and the blend's weight come from (model/tuning.py)
   as logged      the forecasts actually made at each deadline (from GW9 on)
   data checks    that the numbers are right (separate from how good the model is)
 """
@@ -55,11 +57,11 @@ def checks(w: WeekResults, ctx: Context, ev, rounds: list[int], pg: pd.DataFrame
     if w.forecast_check:
         out.insert(next((i + 1 for i, c in enumerate(out) if c["check"] == "No prediction used later data"),
                         len(out)), w.forecast_check)
-    return out
+    return out + list(w.data_checks or [])
 
 
 def _method_table(s: pd.DataFrame) -> pd.DataFrame:
-    return pd.DataFrame({"Method": s["label"], "Player-gameweeks": s["n"], "Bias": s["bias"],
+    return pd.DataFrame({"Method": s["method"].map(evaluation.METHODS), "Player-gameweeks": s["n"], "Bias": s["bias"],
                          "Typical miss": s["mae"], "RMSE": s["rmse"], "Rank correlation": s["rank_corr"],
                          "Top 11 a gameweek": s["top11"], "Top 11 spread (SD)": s["top11_sd"],
                          "Top 11 captured": s["captured"]})
@@ -69,6 +71,111 @@ METHOD_FMT = {"Bias": "{:+.2f}", "Typical miss": "{:.2f}", "RMSE": "{:.3f}", "Ra
               "Top 11 a gameweek": "{:.1f}", "Top 11 spread (SD)": "{:.1f}", "Top 11 captured": pct}
 
 
+def _paired_table(pairs: pd.DataFrame) -> pd.DataFrame:
+    """evaluation.paired as a table: the blend minus each method, gameweek by gameweek."""
+    return pd.DataFrame({
+        "Method": pairs["method"].map(evaluation.METHODS), "Measure": pairs["metric"].map(METRIC_NAMES),
+        "Blend minus method": pairs["mean_diff"],
+        "90% interval": [f"{lo:+.3f} to {hi:+.3f}" if pd.notna(lo) else "–" for lo, hi in zip(pairs["low"], pairs["high"])],
+        "Blend better in": [f"{b} of {g} GWs" for b, g in zip(pairs["reference_better"], pairs["gameweeks"])],
+        "Verdict": [_verdict(m, lo, hi) for m, lo, hi in zip(pairs["metric"], pairs["low"], pairs["high"])]})
+
+
+def _blend_note(w: WeekResults) -> str:
+    """Where the reference blend's weight comes from, and what the other blend is."""
+    wt, st = float(config.EVENT_MODEL_WEIGHT), w.last_season
+    other = ("'Blend, weight from earlier weeks' re-chooses the weight at each deadline from this season's "
+             "earlier gameweeks only, which is unstable while there are few of them.")
+    if st and wt == st["chosen"]["weight"]:
+        return (f"The blend is the planner's, at config.py's weight ({wt:g}), chosen on last season ({st['season']}), "
+                "so it is out of sample here. " + other)
+    return (f"The blend is the planner's, at config.py's weight ({wt:g}). It wasn't chosen on last season: if it was "
+            "picked by looking at these weeks, the blend's scores here are optimistic. " + other)
+
+
+def _last_season(r: Report, w: WeekResults) -> None:
+    """Last season replayed the same way (model/tuning.py): many more gameweeks, so
+    firmer comparisons, and where config.py's half-life and blend weight come from."""
+    st = w.last_season
+    if not st:
+        return
+    season, rounds = st["season"], st["rounds"]
+    span = f"GW{rounds[0]}-GW{rounds[-1]}"
+    chosen, before = st["chosen"], st["before"]
+    now = (float(config.RECENCY_HALF_LIFE_GW), float(config.EVENT_MODEL_WEIGHT))
+    in_use = now == (chosen["half_life"], chosen["weight"])
+    methods = st["methods"]
+    pop = "pool" if "pool" in methods else "all"
+    pop_name = "the planner's pool at each deadline" if pop == "pool" else "every player"
+
+    rows = []
+    for h in sorted(st["rmse"]):
+        ref = st["half_lives"][h]["all"]["summary"].set_index("method").loc[st["rule_method"]]
+        tags = [t for t, on in (("chosen", h == chosen["half_life"]),
+                                ("before", h == before["half_life"] != chosen["half_life"])) if on]
+        rows.append({"Half-life (gameweeks)": f"{h:g}" + (f" ({', '.join(tags)})" if tags else ""),
+                     "RMSE": ref["rmse"], "Rank correlation": ref["rank_corr"], "Top 11 a gameweek": ref["top11"],
+                     "Typical weight from earlier weeks": float(pd.Series(st["half_lives"][h]["weights"]).median())})
+    htab = pd.DataFrame(rows)
+
+    blocks = [card(kv([("Gameweeks", f"{len(rounds)} ({span})"),
+                       ("Player-gameweeks", f"{int(methods['all']['summary']['n'].max()):,} (every player)"),
+                       ("Chosen half-life", f"{chosen['half_life']:g} gameweeks (before: {before['half_life']:g})"),
+                       ("Chosen blend weight", f"{chosen['weight']:g} (before: {before['weight']:g})"),
+                       ("config.py now", f"half-life {now[0]:g}, weight {now[1]:g}"
+                        + (": the chosen ones" if in_use else ": not the chosen ones")),
+                       ("Study run", f"{st['created'][:16].replace('T', ' ')} UTC")]),
+                   f"<h3>Every method, {pop_name}</h3>",
+                   data_table(_method_table(methods[pop]["summary"]), fmt=METHOD_FMT, sortable=False),
+                   "<h3>Is the blend better than each simple method?</h3>",
+                   data_table(_paired_table(evaluation.paired(methods[pop]["gameweeks"])),
+                              fmt={"Blend minus method": "{:+.3f}"}, sortable=False),
+                   note(f"The same replay as this season's, with {len(rounds)} gameweeks as the evidence instead of "
+                        f"a handful. Last season had no season before it filed, so its players had no prior: early "
+                        "gameweeks were harder to predict than this season's.")),
+              card("<h3>Half-life</h3>",
+                   data_table(htab, fmt={"RMSE": "{:.4f}", "Rank correlation": "{:.3f}",
+                                         "Top 11 a gameweek": "{:.1f}", "Typical weight from earlier weeks": "{:.2f}"},
+                              sortable=False),
+                   note(f"Each half-life rebuilds the whole replay (the form features, and the event model's ratings "
+                        f"and rates), scored on every player-gameweek of {span}, for "
+                        f"'{evaluation.METHODS[st['rule_method']]}' (the weight isn't fixed until the half-life is). "
+                        f"The rule, fixed before looking: {st['rules']}."),
+                   r.chart("acc-weights", charts.weight_curve, st["weight_curve"], chosen["weight"], before["weight"],
+                           f"RMSE by the blend's weight, {season} (half-life {chosen['half_life']:g})"),
+                   note("The blend is (1 - weight) x the points model + weight x the event model. config.py's weight "
+                        "is the one fixed weight the weekly forecast uses."))]
+    t = st.get("this_season")
+    if t:
+        same = (t["new"]["half_life"], t["new"]["weight"]) == (t["old"]["half_life"], t["old"]["weight"])
+        crow = []
+        for m, label, f in (("rmse", "RMSE (accuracy)", "{:.3f}"), ("top11", "Top 11 points (picking)", "{:.1f}")):
+            x = t[m]
+            better = (x["high"] < 0) if m == "rmse" else (x["low"] > 0)
+            worse = (x["low"] > 0) if m == "rmse" else (x["high"] < 0)
+            crow.append({"Measure": label, "Chosen": f.format(x["new"]), "Before": f.format(x["old"]),
+                         "Chosen minus before": f"{x['mean_diff']:+.3f}",
+                         "90% interval": f"{x['low']:+.3f} to {x['high']:+.3f}" if pd.notna(x["low"]) else "–",
+                         "Chosen better in": f"{x['new_better']} of {x['gameweeks']} GWs",
+                         "Verdict": "Same settings" if same else
+                         ("Chosen better" if better else ("Before better" if worse else "No clear difference"))})
+        tr = t["rounds"]
+        blocks.append(card(
+            f"<h3>Checked on this season ({t['season']} GW{tr[0]}-GW{tr[-1]})</h3>",
+            data_table(pd.DataFrame(crow), sortable=False),
+            note(f"Chosen: half-life {t['new']['half_life']:g}, weight {t['new']['weight']:g}. Before: half-life "
+                 f"{t['old']['half_life']:g}, weight {t['old']['weight']:g}. Every player, {t['n']:,} player-gameweeks, "
+                 f"paired by gameweek. With {len(tr)} gameweeks this can't prove the choice better; it is there to "
+                 "catch one that does clearly worse.")))
+    r.sections.append(Section(
+        "acc-last-season", f"Last season ({season}): {len(rounds)} gameweeks, and where the settings come from",
+        f"Last season replayed exactly like this one, deadline by deadline, with every player's match records "
+        f"(FPL's own files covered its top 50 only; the rest come from a public archive, checked against FPL's "
+        f"season totals under Data checks). config.py's half-life and blend weight are chosen here, by rules fixed "
+        f"before looking, and then checked on this season, so they aren't tuned on the weeks this tab quotes.",
+        blocks, tab=TAB))
+
+
 def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
     fc = w.forecast
     ev = w.evaluation
@@ -76,6 +183,7 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
         r.sections.append(Section("acc-summary", "How accurate was the model?", "",
                                   [note("Not run this time (--quick). Run python scripts/run_week.py without "
                                         "--quick to replay past gameweeks.")], tab=TAB))
+        _last_season(r, w)
         return
     season = ctx.season
     rounds = ev.rounds
@@ -95,17 +203,12 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
     s = accuracy.summary(pg, h)
 
     # 1 · summary ------------------------------------------------------------------------
-    ptab = pd.DataFrame({
-        "Method": pairs["label"], "Measure": pairs["metric"].map(METRIC_NAMES),
-        "Blend minus method": pairs["mean_diff"],
-        "90% interval": [f"{lo:+.3f} to {hi:+.3f}" if pd.notna(lo) else "–" for lo, hi in zip(pairs["low"], pairs["high"])],
-        "Blend better in": [f"{b} of {g} GWs" for b, g in zip(pairs["reference_better"], pairs["gameweeks"])],
-        "Verdict": [_verdict(m, lo, hi) for m, lo, hi in zip(pairs["metric"], pairs["low"], pairs["high"])]})
+    ptab = _paired_table(pairs)
     r.sections.append(Section(
         "acc-summary", f"How accurate was the model? {span}",
         f"Every finished gameweek since the first, replayed as it stood at its deadline: models fitted only on "
         f"earlier gameweeks, the players and their prices then, the planner's pool rebuilt from that deadline's "
-        f"own forecast, and the blend's weight chosen only from earlier weeks. Every method is scored on the same "
+        f"own forecast. The blend is the planner's, at config.py's weight. Every method is scored on the same "
         f"player-gameweeks. The half-life is config.py's ({h:g} gameweeks).",
         [card(kv([("Gameweeks", f"{len(rounds)} ({span})"), ("Pool player-gameweeks", f"{s['player_gameweeks']:,}"),
                   ("Predicted", f"{s['predicted']:,.0f}"), ("Scored", f"{s['actual']:,.0f}"),
@@ -118,16 +221,17 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
               data_table(_method_table(summ["all"]), fmt=METHOD_FMT, sortable=False),
               note("RMSE and typical miss: how far off each prediction was (lower is better). Rank correlation: "
                    "how well it ordered players within a gameweek. Top 11: the real points of the 11 players it "
-                   "rated highest each gameweek, the measure closest to picking a team. 'Blend, config weight' "
-                   "uses the 0.5 that was chosen by looking at these same weeks, so it is optimistic; the "
-                   "reference ('weight from earlier weeks') is not. Position/price x P(plays) uses the minutes "
-                   "model, so it isn't model-free; Position/price is."),
+                   "rated highest each gameweek, the measure closest to picking a team. " + _blend_note(w)
+                   + " Position/price x P(plays) uses the minutes model, so it isn't model-free; Position/price "
+                   "is."),
               "<h3>Is the blend better than each simple method?</h3>",
               data_table(ptab, fmt={"Blend minus method": "{:+.3f}"}, sortable=False),
               note(f"Gameweek by gameweek, paired: the gameweeks are the independent evidence (hundreds of "
                    f"players share each gameweek's fixtures), so with {len(rounds)} of them the 90% intervals are "
                    "wide. 'No clear difference' means this many gameweeks can't separate the two. For RMSE a "
-                   "negative difference favours the blend; for the others a positive one."))], tab=TAB))
+                   "negative difference favours the blend; for the others a positive one."
+                   + (f" Last season's {len(w.last_season['rounds'])} gameweeks give firmer answers: see "
+                      "'Last season' further down this tab." if w.last_season else "")))], tab=TAB))
 
     # 2 · gameweek by gameweek ---------------------------------------------------------------
     labels = evaluation.METHODS
@@ -150,10 +254,11 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
               "<h3>Top 11 points</h3>", data_table(pivot("top11"), fmt={c: "{:.0f}" for c in labels.values()},
                                                    sortable=False),
               "<h3>RMSE</h3>", data_table(pivot("rmse"), fmt={c: "{:.3f}" for c in labels.values()}, sortable=False),
-              "<h3>The blend's weight each gameweek</h3>",
+              "<h3>'Blend, weight from earlier weeks': its weight each gameweek</h3>",
               data_table(weights, fmt={"Event-model weight": "{:.2f}"}, sortable=False),
-              note("The weight is the one with the lowest RMSE over all earlier gameweeks' predictions; 1.0 means "
-                   "the event model alone.")),
+              note(f"At each deadline, the weight with the lowest RMSE over all earlier gameweeks' predictions (1.0 "
+                   f"means the event model alone). The planner's blend uses config.py's "
+                   f"{config.EVENT_MODEL_WEIGHT:g} throughout.")),
          card(r.chart("acc-gameweeks", charts.accuracy_bars, ref_gw))], tab=TAB))
 
     # 3 · every player (the last few gameweeks) --------------------------------------------------
@@ -284,14 +389,16 @@ def add(r: Report, w: WeekResults, ctx: Context | None = None) -> None:
                                         "Rank correlation": "{:.3f}", "Top 11 a gameweek": "{:.1f}",
                                         "Top 11 captured": pct}, sortable=False),
                   note("Information only: choosing the half-life by looking at these same gameweeks and then "
-                       "quoting them as evidence would be circular. A half-life is chosen on last season's "
-                       "gameweeks (once they're filed in full) and confirmed on this season's.")]
+                       "quoting them as evidence would be circular. config.py's half-life is chosen on last "
+                       "season's gameweeks and checked on this season's: see 'Last season' below.")]
     else:
         blocks = [note("Not run this time (--quick).")]
     r.sections.append(Section(
         "acc-halflife", "Half-life check",
         "The same deadlines replayed with half and double the half-life (every form feature and the event "
         "model's rates rebuilt), scored on the same player-gameweeks.", [card(*blocks)], tab=TAB))
+
+    _last_season(r, w)
 
     # 9 · as logged at the deadline ------------------------------------------------------------------
     logged = forecast_log.load(season.season, rounds)

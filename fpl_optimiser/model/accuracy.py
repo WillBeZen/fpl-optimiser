@@ -190,8 +190,8 @@ def misses(pg: pd.DataFrame, n: int = 10) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def reference_rows(ev, rounds: list[int] | None = None, population: str = "pool") -> pd.DataFrame:
     """The harness's (model/evaluation.py) player-gameweeks in this module's shape:
-    `predicted` is the planner's blend with its weight chosen walk-forward (the
-    reference), plus the actual points, its error, both models' parts and sources."""
+    `predicted` is the planner's blend (the reference), plus the actual points, its
+    error, both models' parts and sources."""
     from fpl_optimiser.model import evaluation
 
     pg = evaluation.player_gameweeks(ev, population, rounds)
@@ -287,14 +287,17 @@ def reconcile(ev, season, rounds: list[int] | None = None, pg: pd.DataFrame | No
 
     wrong = [r for r, src in ev.weight_rounds.items() if any(s >= r for s in src)] if ev.weight_rounds else []
     add("Blend weights chosen from earlier weeks only", not wrong,
-        "each deadline's event-model weight: " + ", ".join(f"GW{r} {w:g}" for r, w in ev.weights.items()
-                                                           if r in rounds)
+        "the 'weight from earlier weeks' blend, at each deadline: " + ", ".join(
+            f"GW{r} {w:g}" for r, w in ev.weights.items() if r in rounds)
         if not wrong else f"deadlines {wrong} used their own or later weeks")
 
     gap = (fw["xp_blend"] - ((1 - fw["event_weight"]) * fw["xp"] + fw["event_weight"] * fw["xp_events"])).abs().max()
     missing = int(fw["xp_blend"].isna().sum())
+    weights = sorted(set(fw["event_weight"].dropna().astype(float)))
     add("Predictions are the planner's blend", missing == 0 and (np.isnan(gap) or gap < 1e-9),
-        "(1 - w) x points model + w x event model for every prediction" + (f"; {missing} missing" if missing else ""))
+        "(1 - w) x points model + w x event model for every prediction, w = "
+        + ", ".join(f"{w:g}" for w in weights) + f" (config.py: {config.EVENT_MODEL_WEIGHT:g})"
+        + (f"; {missing} missing" if missing else ""))
 
     used = set(ev.first_week["half_life"].dropna().astype(float)) if "half_life" in ev.first_week else set()
     used = used or {float(ev.half_life)}

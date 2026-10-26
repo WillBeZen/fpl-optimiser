@@ -60,12 +60,14 @@ class Squad:
 
 def pick_squad(candidates: pd.DataFrame, xp: str = "xp", budget: float = config.BUDGET,
                must_include: tuple = (), exclude: tuple = (),
-               bench_weight: float = config.BENCH_WEIGHT) -> Squad:
+               bench_weight: float = config.BENCH_WEIGHT, max_per_club: int = config.MAX_PER_CLUB) -> Squad:
     """The best legal squad for one gameweek.
 
     candidates : one row per player: id, web_name, team_name, position, price and
                  an expected-points column named by `xp`
     must_include / exclude : player ids to force in or keep out
+    max_per_club : the club limit (lifted to pick the XI of a squad you already own,
+                 which a player's move between clubs can take past it)
     """
     c = candidates.dropna(subset=[xp, "price"]).reset_index(drop=True)
     ids = list(c.index)
@@ -90,7 +92,7 @@ def pick_squad(candidates: pd.DataFrame, xp: str = "xp", budget: float = config.
         prob += pulp.lpSum(start[i] for i in in_pos) >= lo
         prob += pulp.lpSum(start[i] for i in in_pos) <= hi
     for club, rows in c.groupby("team_name").groups.items():
-        prob += pulp.lpSum(squad[i] for i in rows) <= config.MAX_PER_CLUB
+        prob += pulp.lpSum(squad[i] for i in rows) <= max_per_club
     prob += pulp.lpSum(cap[i] for i in ids) == 1
     prob += pulp.lpSum(vice[i] for i in ids) == 1
     for i in ids:

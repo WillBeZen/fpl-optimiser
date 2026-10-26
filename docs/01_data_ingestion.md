@@ -66,10 +66,35 @@ data/raw/fpl/<season>/bootstrap-static.json     players, teams, gameweeks (seaso
   per-gameweek totals (`fpl_api.parse_event_live`), which the Accuracy tab reconciles
   the match records against (see `docs/08_accuracy.md`).
 
-**What is filed today:** 2025/26 (frozen; full-season players, fixtures and results,
-but per-match history for only the top 50 players, because that is all that was
-fetched before the API moved on) and 2026/27 (all 668 players, refreshed by
-`pull_fpl.py`).
+**What is filed today:** 2025/26 (frozen; full-season players, fixtures and results;
+FPL's per-match history for the top 50 players, which is all that was fetched before
+the API moved on, and the archive's for every player: see below) and 2026/27 (all
+668 players, refreshed by `pull_fpl.py`).
+
+### Earlier seasons' match records: the archive (`ingest/archive.py`)
+A public archive kept every player's match records all season:
+`vaastav/Fantasy-Premier-League`'s `merged_gw.csv`, which holds FPL's own
+element-summary rows plus each player's name, position and club. The archive's code is
+MIT-licensed; the data is FPL's.
+
+```
+data/raw/archive/<season>/merged_gw.csv     2025/26: 5.4 MB, 29,757 rows
+```
+
+- `python scripts/pull_archive.py` downloads it once, from a pinned archive commit. It
+  keeps the file only if it is exactly the one that was checked: its git blob id is
+  recorded in `archive.SOURCES`. Then it runs the checks below.
+- `season_store.load()` uses it for every player FPL's own files don't cover. FPL's
+  files win where both exist, and FPL's filed folder is never modified (a frozen season
+  stays frozen). `load(..., archive=False)` reads FPL's files only.
+- **Checked against FPL before use** (`archive.checks`, also listed under the Accuracy
+  tab's data checks):
+  - every record agrees with FPL's fixture list (gameweek, opponent, home or away,
+    score): 29,747 of 29,747;
+  - the 50 players FPL's files cover: 1,893 records, identical in every field;
+  - every player's records add up to FPL's season totals on 18 stats: 841 of 841,
+    once the archive's 10 repeated rows are dropped (exact copies, 9 of them for one
+    player).
 
 ## Linking seasons — the same player, two ids
 

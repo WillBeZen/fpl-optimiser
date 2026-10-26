@@ -122,7 +122,7 @@ def test_data_checks_pass_when_everything_agrees_and_catch_problems():
     leaky.first_week["trained_to"] = leaky.first_week["round"]
     assert failed("later data", ev=leaky)
     other_h = _evaluation()
-    other_h.first_week["half_life"] = 4.0
+    other_h.first_week["half_life"] = config.RECENCY_HALF_LIFE_GW * 2
     assert failed("half-life", ev=other_h)
     broken = _evaluation()
     broken.first_week["xp_blend"] += 0.1

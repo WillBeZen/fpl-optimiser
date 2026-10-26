@@ -139,7 +139,7 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
             ("Form (recency weighting)", f"Recent matches count more: a match {half:g} gameweeks "
              f"ago counts half as much as this week's, {2 * half:g} gameweeks ago a quarter."),
             ("Half-life", f"How many gameweeks it takes for a match to count half as much "
-             f"({half:g} here). Smaller = reacts faster to form."),
+             f"({half:g} here, chosen on last season: see Last-season study). Smaller = reacts faster to form."),
             ("Last season (prior)", f"A player's last-season averages enter his form as if that "
              f"season ended {config.PREV_SEASON_GAP_GW:g} gameweeks before GW1, so they matter early "
              f"on and fade as this season's matches pile up. When the model is fitted, a last-season "
@@ -210,6 +210,12 @@ def groups() -> list[tuple[str, list[tuple[str, str]]]]:
              "points, or what similar players (same position and price) usually score."),
             ("Walk-forward weight", "The blend's event-model weight chosen at each past deadline from earlier "
              "gameweeks only, so the replay never uses a setting picked by looking at the weeks it is judged on."),
+            ("Last-season study", "Last season replayed deadline by deadline like this one, to choose the "
+             "half-life and the blend's weight by rules fixed in advance, then checked on this season: no setting "
+             "is tuned on the weeks it is judged on (scripts/study_last_season.py)."),
+            ("Match archive", "A public copy of every player's match records from a season FPL no longer serves "
+             "(its own files were saved for 2025/26's top 50 only). It is used only once it agrees with FPL's "
+             "records and season totals (Data checks)."),
             ("90% interval", "The range the true difference between two methods probably lies in, given how much "
              "it varied from gameweek to gameweek. If it includes 0, those gameweeks can't tell the methods apart."),
             ("Bias", "The average of predicted minus actual points. Positive: the model expected too much; "

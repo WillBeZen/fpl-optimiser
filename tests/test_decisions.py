@@ -57,6 +57,17 @@ def test_the_vice_captain_doubles_when_the_captain_doesnt_play():
     assert res["captain_id"] is None and res["captain_points"] == 0
 
 
+def test_a_kept_squad_gets_its_xi_after_a_player_moves_club():
+    c = _candidates(n_clubs=12)
+    first = decisions.squad.pick_squad(c).players
+    club = first["team_name"].value_counts().index[0]
+    moved = first.loc[first["team_name"] != club, "id"].iloc[0]
+    later = c.assign(team_name=c["team_name"].where(c["id"] != moved, club))     # now 4 from one club
+    assert (later[later["id"].isin(first["id"])]["team_name"] == club).sum() == 4
+    xi = decisions._xi_for(list(first["id"]), later, later.set_index("id")["xp"]).players
+    assert len(xi) == config.SQUAD_SIZE and (xi["role"] == "XI").sum() == config.XI_SIZE
+
+
 def _evaluation(rounds=(2, 3, 4), injured=None):
     """A replay over a synthetic market: every method predicts each player's xp (the
     reference perfectly, the rest with noise); `injured` scores nothing from GW3 on and

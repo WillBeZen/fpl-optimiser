@@ -41,6 +41,8 @@ class WeekResults:
     half_lives: pd.DataFrame | None = None # model.accuracy.half_life_check(...)
     forecast_check: dict | None = None     # model.accuracy.forecast_path_check(...)
     decisions: dict | None = None          # optimise.decisions.run(...) (+ "actual": your real points)
+    last_season: dict | None = None        # model.tuning.load(...): settings chosen on last season
+    data_checks: list | None = None        # more data checks (last season's archive against FPL)
     chips: pd.DataFrame | None = None      # optimise.whatif.chip_weeks(...)
 
 

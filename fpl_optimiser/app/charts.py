@@ -71,10 +71,10 @@ def _layout(t: dict, title: str = "", x: str = "", y: str = "", height: int = 44
     )
 
 
-def _label(fig: go.Figure, t: dict, x, y, text: str) -> None:
+def _label(fig: go.Figure, t: dict, x, y, text: str, ax: int = 18, ay: int = -22) -> None:
     """A selective direct label with a thin leader line (never one on every point)."""
     fig.add_annotation(x=x, y=y, text=text, showarrow=True, arrowhead=0, arrowwidth=1,
-                       arrowcolor=t["muted"], ax=18, ay=-22,
+                       arrowcolor=t["muted"], ax=ax, ay=ay,
                        font=dict(color=t["ink2"], size=11), bgcolor=t["surface"])
 
 
@@ -597,5 +597,22 @@ def method_lines(gw: pd.DataFrame, metric: str, methods: list[str], labels: dict
             hovertemplate=f"{labels[m]}<br>%{{x}}: %{{y:.2f}}<extra></extra>"))
     layout = _layout(t, title, "", y_title, height=380, legend_rows=min(len(methods), 4))
     layout["xaxis"].update(showgrid=False)
+    fig.update_layout(**layout)
+    return fig
+
+
+def weight_curve(curve: pd.Series, chosen: float, current: float, title: str, theme: str = "light") -> go.Figure:
+    """RMSE against the event model's share of the blend (0 = the points model alone,
+    1 = the event model alone), with the chosen and the current weight marked."""
+    t = THEMES[theme]
+    fig = go.Figure(go.Scatter(
+        x=curve.index, y=curve.to_numpy(), mode="lines+markers", name="RMSE",
+        line=dict(color=t["series"][0], width=2), marker=dict(size=8, line=dict(width=2, color=t["surface"])),
+        hovertemplate="Event model weight %{x:.2f}<br>RMSE %{y:.4f}<extra></extra>"))
+    _label(fig, t, chosen, float(curve.loc[chosen]), f"lowest: {chosen:g}", ax=24, ay=-30)
+    if current != chosen and current in curve.index:
+        _label(fig, t, current, float(curve.loc[current]), f"before: {current:g}", ax=-40, ay=-30)
+    layout = _layout(t, title, "Event model's weight in the blend", "RMSE (points)", height=360)
+    layout["xaxis"].update(showgrid=False, dtick=0.1)
     fig.update_layout(**layout)
     return fig

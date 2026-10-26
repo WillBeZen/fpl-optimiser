@@ -11,8 +11,9 @@ with:
                  before, its square for the one before that... — for the model's
                  fit, so recent seasons count more.
   half_life      the recency half-life the form features were built with
-  earlier_season True for every season but the latest (a model input: the earlier
-                 season was filed for its top players only, so its rows differ)
+  earlier_season True for every season but the latest (a model input: an earlier
+                 season's rows differ, e.g. 2025/26 has no season before it filed, so
+                 none of its players has a prior)
 """
 from __future__ import annotations
 

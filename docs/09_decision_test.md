@@ -56,24 +56,50 @@ That's a reference, not like-for-like: your squad, chips and timing differ.
 One path through one stretch of fixtures: early choices compound, so the season
 ranking is illustrative, and the weekly test is the one with a paired comparison.
 
-## First results (2026/27 GW2–7)
+## This season (2026/27 GW2–7)
+At the current settings (half-life 4, weight 0.65, last season's full match data):
+
 | method | weekly team, pts / GW | season with transfers, pts after hits |
 |---|---|---|
-| Blend (weight from earlier weeks) | 65.2 | 334 |
-| Event model | 65.2 | 372 |
-| Position/price × P(plays) | 63.0 | 360 |
-| Points model | 48.5 | 357 |
-| Recent points (EWMA) | 52.3 | 281 |
-| Season average | 51.8 | 289 |
+| Blend (what the planner uses) | 66.0 | 358 |
+| Points model | 66.2 | 342 |
+| Position/price × P(plays) | 60.2 | 350 |
+| Event model | 60.0 | 362 |
+| Season average | 51.8 | 284 |
+| Recent points (EWMA) | 50.2 | 275 |
 | Hindsight best | 155.0 | — |
 
-The blend and the event model pick identical weekly teams (the walk-forward weight is
-1.0 from GW3). In the season simulation they diverge from different GW2 squads.
+Over six gameweeks no difference is clear. The blend's teams beat position/price ×
+P(plays) by 5.8 points a gameweek, but the interval runs from −5.5 to +17.2. Your real
+team scored 323 over the same gameweeks. Transfers gained between −17 (recent points,
+six hits) and +18 points (the event model) over keeping the first squad. Last season's
+37 gameweeks give firmer answers (below).
 
-The blend's weekly teams beat the points model's clearly: +16.7 points a gameweek, 90%
-interval 3.2 to 30.2. Against position/price × P(plays) the difference is +2.2 ± 5.4,
-too small to separate over six gameweeks. Every simulated season gained from transfers
-(between +1 and +35 points over keeping the first squad).
+(Before last season's full data, at half-life 8 and weight 0.5, the points model's
+weekly teams scored 48.5 a gameweek: the archive mattered most to it.)
+
+## Last season (2025/26 GW2–38, 37 gameweeks)
+The same two tests on last season, from the study that chooses the settings
+(`scripts/study_last_season.py`: half-life 4, the planner's blend at weight 0.65). The
+dashboard shows them under "Last season".
+
+| method | weekly team, pts / GW | blend minus method, 90% interval | season with transfers, pts after hits |
+|---|---|---|---|
+| Blend (what the planner uses) | 61.7 | | 2,117 |
+| Event model | 61.9 | −0.2 (−2.2 to +1.8) | 2,043 |
+| Season average | 57.9 | +3.8 (−0.4 to +7.9) | 2,028 |
+| Points model | 57.0 | +4.7 (+0.1 to +9.3) | 2,023 |
+| Position/price × P(plays) | 54.5 | +7.2 (+2.4 to +12.0) | 1,892 |
+| Recent points (EWMA) | 53.1 | +8.7 (+5.3 to +12.0) | 1,834 |
+| Hindsight best | 154.6 | | — |
+
+With 37 gameweeks the weekly test separates the methods. The blend's teams beat
+position/price × P(plays), recent points and the points model alone; they are level
+with the event model's and just short of clearly ahead of the season average's.
+Against position/price × P(plays) the blend is about 7 points a gameweek better, where
+this season's six weeks can't tell them apart. With transfers over a whole season the
+blend finishes first, 225 points ahead of position/price × P(plays). Every method gained
+from transferring, between 262 and 544 points over keeping its first squad.
 
 ## Cost and caching
 The weekly test takes about 25 seconds and the season test about 2 minutes (the
@@ -83,6 +109,10 @@ depend on: the replay's predictions and real points, the deadlines, the planner'
 dials, and `decisions.VERSION`. So they're only recomputed when a new gameweek
 finishes or something changes.
 
+A squad kept all season can end up with four players from one club when one of them
+moves (27 players changed Premier League club during 2025/26). Picking the best XI of a
+kept squad therefore lifts the club limit; the planner's own transfers still respect it.
+
 ## Tests
 `tests/test_decisions.py`:
 - FPL's scoring: substitutes, formation limits, the goalkeeper rule, the captain and
@@ -91,4 +121,5 @@ finishes or something changes.
 - a season that sells an injured star, with points after hits, bank and free
   transfers following the rules;
 - the cache reused until predictions change;
+- a kept squad still getting its XI after a player moves club;
 - the tab rendering, with your real team for comparison.

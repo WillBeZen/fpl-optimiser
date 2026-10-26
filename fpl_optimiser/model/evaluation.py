@@ -9,8 +9,8 @@ from), everything the planner would have used is rebuilt as of r's deadline:
                 code as the live forecast (predict.forecast_rows)
   the players   those in the game at r, at their club and price at r
   the fixtures  r and the rest of the planning horizon, with later results hidden
-  the blend     the event model's weight chosen only from earlier gameweeks'
-                out-of-sample predictions (walk-forward); config's weight before that
+  the blend     the planner's: config.py's event-model weight, which is chosen on
+                last season (model/tuning.py), so out of sample here
   the pool      the planner's candidate pool as it would have been at r
                 (optimise/pool.py on r's own forecast), plus your squad at r if known
   not possible  FPL's injury flags at r (FPL doesn't archive them): replayed
@@ -19,9 +19,10 @@ from), everything the planner would have used is rebuilt as of r's deadline:
 
 Every method is scored on exactly the same player-gameweeks:
 
-  blend_wf     the planner's blend, weight chosen walk-forward     (the reference)
-  blend_cfg    the blend at config.EVENT_MODEL_WEIGHT (chosen by looking at these
-               same weeks, so in-sample: optimistic)
+  xp_blend     the planner's blend, at config.EVENT_MODEL_WEIGHT   (the reference)
+  blend_wf     the blend with its weight re-chosen at each deadline from earlier
+               gameweeks' out-of-sample predictions only (walk-forward); config's
+               weight before there are any
   xp           the points model alone        xp_events   the event model alone
   pos_price_p  similar players' (same position and price band) average points per
                appearance x the minutes model's P(plays)
@@ -45,8 +46,8 @@ import config
 from fpl_optimiser.model import events, inputs, points
 
 METHODS = {
-    "xp_blend": "Blend, weight from earlier weeks",
-    "blend_cfg": "Blend, config weight (in-sample)",
+    "xp_blend": "Blend (what the planner uses)",
+    "blend_wf": "Blend, weight from earlier weeks",
     "xp": "Points model",
     "xp_events": "Event model",
     "pos_price_p": "Position/price x P(plays)",
@@ -67,7 +68,7 @@ class Evaluation:
     first_week: pd.DataFrame            # per (player, fixture) in each deadline's own gameweek
     horizons: dict[int, pd.DataFrame]   # deadline -> its per-fixture forecast over the horizon
     pools: dict[int, set]               # deadline -> the planner's pool as it would have been
-    weights: dict[int, float]           # deadline -> the walk-forward event-model weight
+    weights: dict[int, float]           # deadline -> blend_wf's event-model weight (walk-forward)
     half_life: float = config.RECENCY_HALF_LIFE_GW
     weight_rounds: dict[int, list[int]] = field(default_factory=dict)   # deadline -> rounds that chose it
     unmatched: int = 0                  # predicted player-fixtures with no match record
@@ -218,13 +219,14 @@ def run(season: str | None = None, table: pd.DataFrame | None = None,
         fx["ewma"] = fx["form_points_pg"]
         fx["season_avg"] = season_average(train, season, fx)
 
-        # the blend: weight from earlier deadlines' out-of-sample first weeks only
+        # the planner's blend (config's weight), and the alternative whose weight is
+        # chosen from earlier deadlines' out-of-sample first weeks only
         w_r = choose_weight(pd.concat(first_weeks)) if first_weeks else float(event_weight)
         weight_rounds[r] = sorted({int(x) for f in first_weeks for x in f["round"].unique()})
-        fx["event_weight"] = w_r
+        fx["event_weight"] = float(event_weight)
         fx["half_life"] = float(half_life)
-        fx["xp_blend"] = (1 - w_r) * fx["xp"] + w_r * fx["xp_events"]
-        fx["blend_cfg"] = (1 - event_weight) * fx["xp"] + event_weight * fx["xp_events"]
+        fx["xp_blend"] = (1 - event_weight) * fx["xp"] + event_weight * fx["xp_events"]
+        fx["blend_wf"] = (1 - w_r) * fx["xp"] + w_r * fx["xp_events"]
         fx["trained_to"] = int(this_train.max()) if len(this_train) else 0
         fx["deadline"] = r
 
@@ -261,12 +263,14 @@ def player_gameweeks(ev: Evaluation, population: str = "pool", rounds: list[int]
     if population == "pool":
         fw = fw[fw["in_pool"]]
     cols = [c for c in METHODS if c in fw]
-    agg = {c: (c, lambda s: s.sum(min_count=len(s))) for c in cols}
-    agg.update(actual=("target_points", "sum"), minutes=("minutes", "sum"), p_play=("p_play", "max"),
+    g = fw.groupby(["id", "round"])
+    agg = dict(actual=("target_points", "sum"), minutes=("minutes", "sum"), p_play=("p_play", "max"),
                fixtures=("fixture_id", "size"), trained_to=("trained_to", "max"),
                event_weight=("event_weight", "first"), in_pool=("in_pool", "any"))
     agg.update({s: (s, "sum") for s in events.SOURCES if s in fw})
-    return fw.groupby(["id", "round"]).agg(**agg).reset_index()
+    # a method's prediction for a double gameweek: its fixtures added up, missing if any is
+    preds = g[cols].sum().mask(fw[cols].isna().groupby([fw["id"], fw["round"]]).any())
+    return pd.concat([preds, g.agg(**agg)], axis=1).reset_index()
 
 
 def by_gameweek(pgw: pd.DataFrame) -> pd.DataFrame:
