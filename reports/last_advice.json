@@ -1,0 +1,139 @@
+{
+ "action_score": 68,
+ "verdict": "act",
+ "summary": "I found little current news. The one relevant source is a 17 Oct Fantasy Football Scout piece that is nine days old. It says Maresca played down Haaland's injury scare after he limped off. My follow-up searches failed, so Calafiori's hip and Jo\u00e3o Pedro's knock are unchecked. The plan is reasonable and uses free transfers with no hit. Recheck the injury flags nearer the deadline.",
+ "captain_ok": true,
+ "captain_note": "Haaland is still the sensible captain. Maresca said he was okay after the knock in the 17 Oct report, but check his status before the deadline.",
+ "player_flags": [
+  {
+   "player": "Haaland",
+   "status": "fit",
+   "note": "Limped off after a heavy knock, but Maresca said he was okay. The report is from 17 Oct and may be stale.",
+   "source": "https://www.fantasyfootballscout.co.uk/2026/10/17/fpl-notes-haaland-semenyo-oreilly-injury-latest"
+  },
+  {
+   "player": "Calafiori",
+   "status": "doubt",
+   "note": "FPL flags a hip issue with a 75% chance of playing. I found no fresh update.",
+   "source": ""
+  },
+  {
+   "player": "Jo\u00e3o Pedro",
+   "status": "doubt",
+   "note": "FPL flags 75%. He is on the bench, so the impact is low. No fresh news found.",
+   "source": ""
+  },
+  {
+   "player": "Raya",
+   "status": "unknown",
+   "note": "No news found.",
+   "source": ""
+  },
+  {
+   "player": "Gro\u00df",
+   "status": "unknown",
+   "note": "No news found.",
+   "source": ""
+  },
+  {
+   "player": "Silva",
+   "status": "unknown",
+   "note": "No news found.",
+   "source": ""
+  }
+ ],
+ "adjustments": [
+  "Make the transfers late in the week, after the Arsenal and Man City press conferences.",
+  "If Calafiori is ruled out, start Davis or Mitchell from the bench."
+ ],
+ "risks": [
+  "Calafiori's hip could keep him out, or he could be rotated.",
+  "Haaland's knock could return.",
+  "The news check was thin because the searches were cut off."
+ ],
+ "model": "claude-sonnet-5-5",
+ "searches": 2,
+ "sources": [
+  {
+   "title": "FPL notes: Haaland, Semenyo + O\u2019Reilly injury latest",
+   "url": "https://www.fantasyfootballscout.co.uk/2026/10/17/fpl-notes-haaland-semenyo-oreilly-injury-latest"
+  },
+  {
+   "title": "Haaland, Semenyo, Szoboszlai: Latest FPL team news ahead of Gameweek 8",
+   "url": "https://www.fantasyfootballscout.co.uk/2026/10/19/haaland-semenyo-latest-fpl-team-news-ahead-of-gameweek-8"
+  },
+  {
+   "title": "FPL Gameweek 7 team news: Friday\u2019s live injury updates",
+   "url": "https://www.fantasyfootballscout.co.uk/2026/10/16/fpl-gameweek-7-team-news-fridays-live-injury-updates-4"
+  },
+  {
+   "title": "FPL Gameweek 6 early team news: Injury latest on all 20 teams after intl break",
+   "url": "https://www.fantasyfootballscout.co.uk/2026/10/08/fpl-gameweek-6-early-team-news-injury-latest-on-all-20-teams-after-intl-break"
+  },
+  {
+   "title": "FPL notes: Calafiori injury, Saka latest + Everton fitness updates",
+   "url": "https://www.fantasyfootballscout.co.uk/2026/10/25/fpl-notes-calafiori-injury-saka-latest-everton-fitness-updates"
+  },
+  {
+   "title": "FPL Gameweek 3 team news: Friday\u2019s live injury updates",
+   "url": "https://www.fantasyfootballscout.co.uk/2026/09/04/fpl-gameweek-3-team-news-fridays-live-injury-updates-3"
+  },
+  {
+   "title": "FPL Gameweek 8: Sunday\u2019s goals, assists, bonus + DefCon points",
+   "url": "https://fantasyfootballscout.co.uk/2026/10/25/fpl-gameweek-8-sundays-goals-assists-bonus-defcon-points"
+  },
+  {
+   "title": "FPL Gameweek 9 tips: Best players, predicted line-ups, team news + more",
+   "url": "https://www.fantasyfootballscout.co.uk/fpl-gameweek-9-tips-best-players-predicted-line-ups-team-news-more-4"
+  },
+  {
+   "title": "Calafiori Injury Update: Arteta Reveals 'Slight Issue', FPL Flags 75%",
+   "url": "https://thefalse9.com/2026/10/calafiori-injury-update.html"
+  },
+  {
+   "title": "7swr6av7i5hc1404onn9sfj63 injured cherki ruled out frances world cup qualifiers",
+   "url": "https://www.fotmob.com/zh-Hans/news/7swr6av7i5hc1404onn9sfj63-injured-cherki-ruled-out-frances-world-cup-qualifiers"
+  },
+  {
+   "title": "Riccardo Calafiori injury: Arsenal dealt new worry as Mikel Arteta confirms 'slight issue' - Yahoo Sports",
+   "url": "https://sports.yahoo.com/articles/riccardo-calafiori-injury-arsenal-dealt-172344007.html"
+  },
+  {
+   "title": "Arsenal 24yo picked up new injury vs Everton - Yahoo Sports",
+   "url": "https://sports.yahoo.com/articles/arsenal-24yo-picked-injury-vs-103500610.html"
+  },
+  {
+   "title": "Calafiori picks up injury in Arsenal win - AOL",
+   "url": "https://www.aol.com/articles/calafiori-picks-injury-arsenal-win-175529000.html"
+  },
+  {
+   "title": "Arsenal handed Riccardo Calafiori injury concern as Mikel Arteta reveals \u2018slight issue' after Everton win AFTV",
+   "url": "https://aftv.co.uk/latest-arsenal-news/arsenal-handed-riccardo-calafiori-injury-concern-as-mikel-arteta-reveals-slight-issue-after-everton-win/"
+  },
+  {
+   "title": "'He had a slight issue': Mikel Arteta delivers update on Riccardo Calafiori concern - Football",
+   "url": "https://tribuna.com/en/news/2026-10-24-he-had-a-slight-issue-mikel-arteta-delivers-update-on-riccardo-calafiori-concern/"
+  },
+  {
+   "title": "Calafiori Injury Update: Arteta Reveals 'Slight Issue', FPL Flags 75%",
+   "url": "https://thefalse9.com/2026/10/calafiori-injury-update.html"
+  },
+  {
+   "title": "Arsenal Injury News vs Fleetwood: Saka Out for Weeks, Calafiori a Doubt",
+   "url": "https://thefalse9.com/2026/10/arsenal-injury-news-vs-fleetwood.html"
+  },
+  {
+   "title": "Arsenal's Magalhaes and Konsa Star in Win Over Everton Despite Injury Concerns - SSBCrack News",
+   "url": "https://news.ssbcrack.com/arsenals-magalhaes-and-konsa-star-in-win-over-everton-despite-injury-concerns/"
+  },
+  {
+   "title": "arsenal fear riccardo calafiori injury liverpool",
+   "url": "https://global.espn.com/football/story/_/id/41948406/arsenal-fear-riccardo-calafiori-injury-liverpool"
+  }
+ ],
+ "error": "",
+ "input_tokens": 44297,
+ "output_tokens": 1320,
+ "checked_at": "2026-10-26 15:59",
+ "gameweek": 9
+}

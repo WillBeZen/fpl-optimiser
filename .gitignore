@@ -16,10 +16,10 @@ data/cache/*
 !data/*/.gitkeep
 
 # Generated HTML report (rebuild with: python scripts/make_report.py)
-reports/
+#reports/
 
 # macOS
 .DS_Store
 
 # Created by seleniumbase (soccerdata's browser driver for FBref)
-downloaded_files/
+#downloaded_files/
