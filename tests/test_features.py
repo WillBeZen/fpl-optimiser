@@ -15,6 +15,7 @@ EXPECTED_COLUMNS = [
     "target_points", "minutes",
     "form_points_pg", "form_minutes_pg", "form_xg_pg", "form_xa_pg", "form_xgi_pg",
     "form_defcon_pg", "form_bonus_pg", "form_bps_pg", "games_played", "form_starts_rate",
+    "last_minutes", "starts_last3", "zero_run",
     "opp_gc_pg_asof", "opp_archetype", "opp_str_def", "x_xgi_oppgc", "is_cold",
     "has_prev_season", "prev_points_per_gw", "prev_minutes_per_gw",
     "prev_points_per_90", "prev_xgi_per_90", "prev_defcon_per_90", "prev_changed_team",
@@ -353,3 +354,14 @@ def test_prediction_table_double_and_blank_gameweeks():
 def test_training_table_empty_history():
     tbl = build.build_training_table(pd.DataFrame(), FIXTURES, PLAYERS, PROFILES, HL)
     assert tbl.empty and list(tbl.columns) == EXPECTED_COLUMNS
+
+
+def test_recent_minutes_see_only_earlier_matches():
+    """90 in GW1, 0 in GW2, a double gameweek of 0 and 30 in GW3, then GW4."""
+    got = build._recent_minutes(np.array([1.0, 2.0, 3.0, 3.0, 4.0]), np.array([90.0, 0.0, 0.0, 30.0, 90.0]))
+    last, starts, missed = got.T
+    assert np.isnan(got[0]).all()                                  # GW1: nothing earlier
+    assert (last[1], starts[1], missed[1]) == (90.0, 1.0, 0.0)
+    for i in (2, 3):                                               # both GW3 rows see GW1-2 only
+        assert (last[i], starts[i], missed[i]) == (0.0, 0.5, 1.0)
+    assert (last[4], starts[4], missed[4]) == (30.0, 0.0, 0.0)     # last three: 0, 0, 30

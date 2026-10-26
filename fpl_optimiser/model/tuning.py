@@ -8,8 +8,9 @@ checked on this season's finished gameweeks. The rules were fixed before looking
   half-life     each candidate in HALF_LIVES rebuilds the whole replay (the form
                 features, and the event model's team ratings and player rates).
                 Chosen: the lowest RMSE of the blend whose weight is chosen from
-                earlier weeks (RULE_METHOD) over every player-gameweek; the setting
-                before the study stays unless another beats it by more than TIE.
+                earlier weeks (RULE_METHOD) over every player-gameweek; the half-life in
+                config.py when the study runs stays unless another beats it by more
+                than TIE.
   blend weight  at that half-life, the fixed event-model weight with the lowest RMSE
                 over the same player-gameweeks (evaluation.WEIGHT_GRID).
 
@@ -108,28 +109,30 @@ def run(season: str, half_lives=HALF_LIVES, before: tuple[float, float] | None =
     """The study on a finished season: a quick replay (first weeks only) at every
     candidate half-life, the half-life and then the weight chosen, and a full replay
     at the chosen settings (pools, the planning horizon) for the methods and the
-    decision test. `before`: the (half-life, weight) the choice is measured against,
-    config.py's by default. Returns (study, the full replay)."""
+    decision test. `before`: the (half-life, weight) the choice is checked against on
+    this season, config.py's by default; the tie rule always protects config.py's
+    half-life. Returns (study, the full replay)."""
     from fpl_optimiser.features import multi_season
 
+    incumbent = float(config.RECENCY_HALF_LIFE_GW)
     before_h, before_w = (float(x) for x in (before or (config.RECENCY_HALF_LIFE_GW, config.EVENT_MODEL_WEIGHT)))
     tables, by_h, curves = {}, {}, {}
-    for h in sorted({float(x) for x in half_lives} | {before_h}):
+    for h in sorted({float(x) for x in half_lives} | {incumbent, before_h}):
         log(f"    {season} at half-life {h:g} ...")
         tables[h] = multi_season.build_all([season], half_life=h)
         quick = evaluation.run(season, tables[h], half_life=h, event_weight=before_w, horizon=1, with_pools=False)
         by_h[h], curves[h] = half_life_scores(quick), weight_curve(quick)
     rmse = {h: float(s["all"]["summary"].set_index("method").at[RULE_METHOD, "rmse"]) for h, s in by_h.items()}
-    h_star = choose_half_life(rmse, before_h)
+    h_star = choose_half_life(rmse, incumbent)
     w_star = float(curves[h_star].idxmin())
     log(f"    {season}: the full replay at half-life {h_star:g}, weight {w_star:g} ...")
     ev = evaluation.run(season, tables[h_star], half_life=h_star, event_weight=w_star)
     study = {"season": season, "version": VERSION, "created": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-             "rounds": list(ev.rounds), "before": {"half_life": before_h, "weight": before_w},
+             "rounds": list(ev.rounds), "before": {"half_life": before_h, "weight": before_w}, "incumbent": incumbent,
              "half_lives": by_h, "rmse": rmse, "rule_method": RULE_METHOD, "weight_curve": curves[h_star],
              "methods": half_life_scores(ev), "chosen": {"half_life": h_star, "weight": w_star},
              "rules": (f"half-life: the lowest RMSE over every player-gameweek of the blend whose weight is chosen "
-                       f"from earlier weeks, the one before the study unless another beats it by more than {TIE}; "
+                       f"from earlier weeks, config.py's ({incumbent:g}) unless another beats it by more than {TIE}; "
                        f"weight: the lowest RMSE at that half-life")}
     return study, ev
 

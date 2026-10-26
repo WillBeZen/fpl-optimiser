@@ -4,7 +4,7 @@ season, check them on this season, and file the study for the dashboard
 (model/tuning.py).
 
     python scripts/study_last_season.py                  # about 25 minutes; no API spend
-    python scripts/study_last_season.py --before 8 0.5   # measured against other settings
+    python scripts/study_last_season.py --before 8 0.5   # checked against other settings
 
 Needs last season's full match records (python scripts/pull_archive.py). The weekly
 run only reads the filed study; run this once a season, or after changing the model.
@@ -27,7 +27,8 @@ from fpl_optimiser.optimise import decisions
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--before", nargs=2, type=float, metavar=("HALF_LIFE", "WEIGHT"),
-                    help="the settings the choice is measured against (default: config.py's)")
+                    help="the settings the choice is checked against on this season (default: config.py's); "
+                         "the tie rule always protects config.py's half-life")
     args = ap.parse_args()
     warnings.filterwarnings("ignore")
     this = season_store.available()[-1]

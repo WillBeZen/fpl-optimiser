@@ -25,7 +25,7 @@ lives in `docs/` — **update the matching doc whenever you change a section.**
 ```bash
 source .venv/bin/activate                      # -> ~/.venvs/fpl-optimiser (see Gotchas)
 pip install -r requirements.txt
-python -m pytest -q                            # MUST stay green (163 tests today)
+python -m pytest -q                            # MUST stay green (164 tests today)
 python scripts/run_week.py --open              # THE weekly run: pull -> predict -> plan -> advise -> report
 python scripts/run_week.py --no-pull --no-advisor --quick   # fast re-run: no pull, no API spend, no what-ifs
 python scripts/pull_fpl.py                     # just file the live season into data/raw/fpl/<season>/
@@ -227,6 +227,9 @@ reports/                      generated HTML (git-ignored)
   check catches any other drift.
 - **Avoid Python lambdas in big groupbys**: `evaluation.player_gameweeks` used one per
   method and took 42 s on a season's 29,000 rows (0.1 s vectorised).
+- **A replay flatters inputs that spot absences**: past injury flags aren't archived,
+  so in a replay an input like `zero_run` does work the live flags partly do. Judge such
+  inputs on the replay, but expect a smaller gain live.
 - **The accuracy replay can't apply past injury flags** (FPL doesn't archive them);
   `forecast_log` files each week's real forecast so later weeks can compare it.
 - **Free transfers aren't in FPL's API**: `my_team.free_transfers` replays your
@@ -255,6 +258,8 @@ reports/                      generated HTML (git-ignored)
       (thresholds `CHIP_THRESHOLD_POINTS`, the GW19 split, a chip × gameweek what-if).
 - [x] **Full 2025/26 match data** from a public archive, checked against FPL; the
       half-life and blend weight chosen on it and checked on 2026/27.
+- [x] **Recent minutes inputs** (latest match's minutes, 60+ in the last three, matches
+      missed in a row): kept because last season's replay was clearly more accurate.
 - [ ] Richer opponent stats (team xGA, PPDA) if a source becomes reachable.
 
 ## Working style

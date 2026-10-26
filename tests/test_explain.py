@@ -17,9 +17,12 @@ def test_weight_curve_halves_every_half_life_and_shares_add_up():
 
 
 def test_last_season_fades_through_the_season():
-    s = explain.prior_share()
+    s = explain.prior_share(half_life=8.0, gap_gw=8.0)
     assert s["share"].iloc[0] == pytest.approx(1.0)                   # GW1: all last season
     assert s["share"].is_monotonic_decreasing and s["share"].iloc[-1] < 0.05
+    slower = explain.prior_share(half_life=16.0, gap_gw=8.0)["share"]  # a longer memory fades later
+    assert slower.is_monotonic_decreasing and (slower.iloc[1:] > s["share"].iloc[1:]).all()
+    assert explain.prior_share()["share"].is_monotonic_decreasing      # whatever config.py's half-life
 
 
 def _history():

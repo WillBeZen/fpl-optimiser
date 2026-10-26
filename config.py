@@ -93,9 +93,11 @@ SCORING = {
 # 0.5 ** (g / HALF_LIFE): at g = HALF_LIFE it counts half as much as a current
 # match; at 2*HALF_LIFE, a quarter. Smaller half-life = more reactive to form.
 # Chosen on 2025/26 (scripts/study_last_season.py: every deadline replayed at 4, 6, 8,
-# 12 and 16): 4 had the lowest RMSE, better than 8 in 30 of 37 gameweeks, with no
-# difference in picking. Checked on 2026/27 GW2-7: lower RMSE than 8 (docs/08).
-RECENCY_HALF_LIFE_GW = 4.0
+# 12 and 16). Once the model had the recent-minutes inputs, accuracy barely depended on
+# it (all within 0.003 RMSE): 16 was lowest, by more than the 0.002 margin over the 4
+# used before, and picked the best top 11. Checked on 2026/27 GW2-7: no clear
+# difference. Untested: how long last season lingers mid-season (docs/08).
+RECENCY_HALF_LIFE_GW = 16.0
 
 # Multi-week planning (Section 5). How many gameweeks ahead the planner reasons
 # about when choosing to bank a transfer, spend it, or take a hit.
@@ -137,9 +139,9 @@ CHIP_THRESHOLD_POINTS = {
 # (1 - w) x the points model (gradient-boosted trees) + w x the event model (team
 # ratings -> fixture goals -> each player's goals, assists, clean sheets...). 0 = points
 # model only. Chosen on 2025/26 at the half-life above (the lowest RMSE; anything from
-# 0.5 to 0.75 was within 0.001), so this season's comparisons are out of sample
+# 0.6 to 0.75 was within 0.0002), so this season's comparisons are out of sample
 # (scripts/study_last_season.py, docs/08).
-EVENT_MODEL_WEIGHT = 0.65
+EVENT_MODEL_WEIGHT = 0.70
 
 # Injured with no return date (Section 3). FPL's chance of playing covers the next
 # gameweek only. When the news gives a date ("Expected back 8 Nov", "Suspended until
@@ -181,9 +183,9 @@ ADVANCED_STATS_SOURCE = "fpl"
 
 # Last season as a prior (Section 2). A player's previous-season averages enter his
 # recency-weighted form as if that season ended PREV_SEASON_GAP_GW gameweeks before
-# GW1 (the summer break, in decay terms). With half-life 4 and gap 8, last season
-# is worth ~1.6 recent matches at GW1, ~0.3 by GW10, almost nothing by GW20. Bigger =
-# trust last season less.
+# GW1 (the summer break, in decay terms). With half-life 16 and gap 8, last season
+# is worth ~13 recent matches at GW1, ~9 by GW10 and ~6 by GW20 (about 56% of a
+# player's form weight at GW10, 32% at GW20). Bigger = trust last season less.
 PREV_SEASON_GAP_GW = 8.0
 
 # How much a previous-season training row counts relative to this season's when

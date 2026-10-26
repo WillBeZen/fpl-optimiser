@@ -67,6 +67,7 @@ def test_the_study_chooses_then_replays_in_full(monkeypatch):
     assert all(h == 1 and not pools and ew == 0.5 for _, h, pools, ew in calls[:-1])   # quick, at the old weight
     assert calls[-1] == (6.0, config.PLANNING_HORIZON_GW, True, w)                    # full, at the chosen ones
     assert "pool" in study["methods"] and "pool" not in study["half_lives"][4.0]
+    assert study["incumbent"] == config.RECENCY_HALF_LIFE_GW                       # the tie protects config's
 
 
 def test_the_study_is_filed_and_read_back(tmp_path, monkeypatch):

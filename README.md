@@ -44,7 +44,7 @@ scratch, just no personal transfer plan or news check.
 ### First time
 1. Set up as above (Python 3.11+; tested on 3.13), then check everything works:
    ```bash
-   python -m pytest -q              # 163 offline tests, about 90 seconds; never touches the network
+   python -m pytest -q              # 164 offline tests, about 90 seconds; never touches the network
    python config.py                 # prints "config OK"
    python scripts/verify_setup.py   # live check: FPL reachable, opponent source, rules match FPL's
    python scripts/check_claude.py   # optional: one tiny Claude request (a fraction of a cent)

@@ -45,10 +45,15 @@ PRIOR_CONTEXT_COLUMNS = [
     "prev_points_per_90", "prev_xgi_per_90", "prev_defcon_per_90", "prev_changed_team",
 ]
 
+# Recent minutes, unweighted: who is playing right now. From this season's earlier
+# matches only (NaN before the first): minutes in the latest one, the share of the
+# last three with 60+ minutes, and how many running he has missed (0 minutes).
+RECENT_COLUMNS = ["last_minutes", "starts_last3", "zero_run"]
+
 _OUTPUT_COLUMNS = [
     "id", "round", "web_name", "position", "was_home", "opponent_team", "price",
     "target_points", "minutes",
-    *_FORM_FIELDS, "games_played", "form_starts_rate",
+    *_FORM_FIELDS, "games_played", "form_starts_rate", *RECENT_COLUMNS,
     "opp_gc_pg_asof", "opp_archetype", "opp_str_def", "x_xgi_oppgc", "is_cold",
     *PRIOR_CONTEXT_COLUMNS,
 ]
@@ -233,11 +238,30 @@ def build_training_table(history_all: pd.DataFrame, fixtures: pd.DataFrame,
     return _apply_cold_start_priors(_finish(tbl, profiles, last)[_OUTPUT_COLUMNS])
 
 
+def _recent_minutes(rounds: np.ndarray, mins: np.ndarray) -> np.ndarray:
+    """RECENT_COLUMNS for one player's rows, sorted by round: each row sees only the
+    matches in strictly earlier rounds (a double gameweek's two rows see the same)."""
+    k = np.searchsorted(rounds, rounds, side="left")         # row i's earlier matches: [0, k[i])
+    m = np.nan_to_num(mins)
+    run = np.zeros(len(m))                                   # matches missed running, up to each one
+    for j in range(len(m)):
+        run[j] = (run[j - 1] + 1 if j else 1) if m[j] == 0 else 0
+    sixty = np.concatenate([[0.0], np.cumsum(m >= 60)])
+    out = np.full((len(m), len(RECENT_COLUMNS)), np.nan)
+    has = k > 0
+    last, n3 = k[has] - 1, np.minimum(k[has], 3)
+    out[has, 0] = mins[last]
+    out[has, 1] = (sixty[k[has]] - sixty[k[has] - n3]) / n3
+    out[has, 2] = run[last]
+    return out
+
+
 def _player_form(h: pd.DataFrame, half_life: float, last: pd.DataFrame | None,
                  prior_gap_gw: float, prior_n_gw: int) -> pd.DataFrame:
     """Form for every row of `h` (any players' histories), strictly from earlier
     rounds (see _asof_weights), with last season blended in where `last` has the
-    player (see weighted_form_asof). Indexed like `h`."""
+    player (see weighted_form_asof), and recent minutes (_recent_minutes). Indexed
+    like `h`."""
     rounds = _floats(h["round"])
     stats = np.column_stack([_floats(_numeric(h, col)) for col in _FORM_FIELDS.values()])
     mins = _floats(_numeric(h, "minutes"))
@@ -248,6 +272,7 @@ def _player_form(h: pd.DataFrame, half_life: float, last: pd.DataFrame | None,
     form = np.full(stats.shape, np.nan)
     games_played = np.zeros(len(h))
     starts_rate = np.full(len(h), np.nan)
+    recent = np.full((len(h), len(RECENT_COLUMNS)), np.nan)
     for pid, idx in h.groupby("id").indices.items():
         W, earlier = _asof_weights(rounds[idx], half_life)
         num, den = _weighted_sums(W, np.column_stack([stats[idx], played_60[idx]]))
@@ -260,10 +285,12 @@ def _player_form(h: pd.DataFrame, half_life: float, last: pd.DataFrame | None,
         form[idx] = means[:, :-1]
         starts_rate[idx] = means[:, -1]
         games_played[idx] = earlier @ played[idx]
+        recent[idx] = _recent_minutes(rounds[idx], mins[idx])
 
     out = pd.DataFrame(form, columns=list(_FORM_FIELDS), index=h.index)
     out["games_played"] = games_played.astype(int)
     out["form_starts_rate"] = starts_rate
+    out[RECENT_COLUMNS] = recent
     return out
 
 

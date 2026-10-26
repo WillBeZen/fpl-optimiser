@@ -20,6 +20,7 @@ NUMERIC = [
     "price",
     "form_points_pg", "form_minutes_pg", "form_xg_pg", "form_xa_pg", "form_xgi_pg",
     "form_defcon_pg", "form_bonus_pg", "form_bps_pg", "form_starts_rate", "games_played",
+    "last_minutes", "starts_last3", "zero_run",          # who is playing right now (build.RECENT_COLUMNS)
     "opp_gc_pg_asof", "x_xgi_oppgc",
     "prev_points_per_gw", "prev_minutes_per_gw", "prev_points_per_90",
     "prev_xgi_per_90", "prev_defcon_per_90",

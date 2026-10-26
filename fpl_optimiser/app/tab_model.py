@@ -37,6 +37,9 @@ INPUT_NOTES = {
     "form_bps_pg": "recency-weighted BPS per gameweek",
     "form_starts_rate": "recency-weighted share of matches with 60+ minutes",
     "games_played": "this season's appearances so far",
+    "last_minutes": "minutes in the latest match (unweighted: who is playing right now)",
+    "starts_last3": "share of the last three matches with 60+ minutes",
+    "zero_run": "matches missed in a row (0 minutes) going into this one",
     "opp_gc_pg_asof": "the opponent's recency-weighted goals conceded per game",
     "x_xgi_oppgc": "attacking form x opponent leakiness (an interaction)",
     "prev_points_per_gw": "last season's points per gameweek",
@@ -48,7 +51,7 @@ INPUT_NOTES = {
     "is_cold": "fewer than 3 games yet (form filled from the position's typical value)",
     "has_prev_season": "has an FPL record last season",
     "prev_changed_team": "changed club since last season",
-    "earlier_season": "a training row from last season (filed for its top 50 players only), never when predicting",
+    "earlier_season": "a training row from last season, never when predicting",
     "position": "GK / DEF / MID / FWD",
 }
 

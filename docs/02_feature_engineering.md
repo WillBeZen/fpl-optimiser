@@ -21,14 +21,16 @@ gameweeks ago by
 weight = 0.5 ** (g / half_life)
 ```
 
-`half_life` (default `config.RECENCY_HALF_LIFE_GW = 4`) is the number of gameweeks
+`half_life` (default `config.RECENCY_HALF_LIFE_GW = 16`) is the number of gameweeks
 at which a match counts **half** as much as the most recent one. Worked example
-with half-life 4: last week ≈ 0.84, two weeks ago ≈ 0.71, four weeks ago = 0.50,
-eight ago = 0.25. A player's "form xGI" is then a weighted average of his
+with half-life 16: last week ≈ 0.96, four weeks ago ≈ 0.84, eight ago ≈ 0.71,
+sixteen ago = 0.50. A player's "form xGI" is then a weighted average of his
 per-match xGI using those weights — a smooth, recency-biased number rather than a
 flat season average. Lower the half-life to chase hot streaks; raise it to trust
-the longer record. It is chosen on last season, not by guesswork: 4 beat 6, 8, 12 and
-16 on accuracy over 2025/26's 37 gameweeks (`docs/08_accuracy.md`).
+the longer record. It is chosen on last season, not by guesswork
+(`docs/08_accuracy.md`). Without the recent-minutes inputs below, a short half-life (4)
+was clearly more accurate, because it caught who had stopped playing. With them,
+accuracy barely depends on it, and 16 came out best.
 
 ## 2. Opponent characteristics + archetypes (`features/opponent.py`)
 
@@ -64,6 +66,7 @@ leakage-free (next section). Archetypes are coarse, season-stable descriptors.
 | keys | `id`, `round`, `web_name`, `position`, `was_home`, `opponent_team` |
 | targets | `target_points`, `minutes` |
 | player form (recency-weighted, **prior matches only**) | `form_points_pg`, `form_minutes_pg`, `form_xg_pg`, `form_xa_pg`, `form_xgi_pg`, `form_defcon_pg`, `form_bonus_pg`, `form_bps_pg`, `form_starts_rate`, `games_played` |
+| recent minutes (unweighted, **prior matches only**) | `last_minutes`, `starts_last3`, `zero_run` |
 | opponent | `opp_gc_pg_asof` (leakage-free), `opp_archetype`, `opp_str_def` (venue-correct) |
 | interaction | `x_xgi_oppgc` = attacking form × opponent leakiness |
 | cold-start | `is_cold` |
@@ -85,6 +88,17 @@ when predicting match *i* (zero unless *j* was in a strictly earlier round), so
 each form feature is a single matrix product. A full season (~32k rows) builds in
 under half a second, against 3+ minutes for the old row-by-row loop, with output
 identical to it. A test checks the two agree row by row.
+
+**Recent minutes: who is playing right now.** Recency-weighted form blurs a sudden
+change: a starter dropped or injured last week still carries most of his minutes
+form. Three unweighted inputs from this season's earlier matches make it explicit:
+minutes in the latest match (`last_minutes`), the share of the last three with 60+
+minutes (`starts_last3`) and how many matches running the player has missed with 0
+minutes (`zero_run`). NaN before the first match. Added because the replay found
+recent points ranked every player better than the model did, mostly by spotting who
+had stopped playing (`docs/08_accuracy.md`). FPL's injury flags do part of this job
+live, but past flags aren't archived, and a player dropped without an injury isn't
+flagged at all.
 
 **Venue-correct opponent strength.** If the player was at home, his opponent
 played *away*, so we attach the opponent's **away** defensive rating (and vice
@@ -113,11 +127,11 @@ row's form as if it had been played just before GW1: its 38 gameweeks at the
 player's per-gameweek averages, ending `config.PREV_SEASON_GAP_GW` gameweeks
 (default 8, standing in for the summer break) before GW1. So at GW1 his form *is*
 last season's average, and as this season's (more recent) matches arrive their
-weight takes over. With half-life 4 and gap 8, last season counts like ~1.6 recent
-matches at GW1, ~0.3 by GW10 and almost nothing by GW20: about 30% of a player's form
-weight at GW4 and 7% at GW10. (At the old half-life of 8 it was 64% and 31%; the check
-of the new half-life on 2026/27 GW2–7, the weeks this matters most, found it more
-accurate.) Raise the gap to trust last season less. `weighted_form_asof(..., prior=...)` is the readable definition (it literally
+weight takes over. With half-life 16 and gap 8, last season counts like ~13 recent
+matches at GW1, ~9 by GW10 and ~6 by GW20: about 81% of a player's form weight at GW4,
+56% at GW10 and 32% at GW20. Last season's own replay couldn't test this (2024/25 isn't
+filed, so its players had no prior). The check on 2026/27 GW2–7 found no harm, but
+mid-season it is untested until next season. Raise the gap to trust last season less. `weighted_form_asof(..., prior=...)` is the readable definition (it literally
 appends the virtual matches); the table builder uses the equivalent closed form, and
 a test checks they agree.
 
@@ -168,7 +182,8 @@ Not a model input yet: they are for looking at.
   vectorised table matches `weighted_form_asof` row by row (with and without a
   prior); venue-correct opponent strength; a whole-table **no-leakage** test with and
   without last season; leakage-free cold-start priors; the prior table from linked
-  totals; last season seeding GW1 and fading week by week; an end-to-end smoke test.
+  totals; last season seeding GW1 and fading week by week; recent minutes seeing only
+  earlier matches (a double gameweek's two rows the same); an end-to-end smoke test.
 - `tests/test_multi_season.py` — two tiny filed seasons through store → link →
   prior → table: stacking, sample weights, the same player under two ids.
 - `tests/test_player_profiles.py` — per-90 blending across seasons and types that

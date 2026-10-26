@@ -14,17 +14,17 @@ fc.per_fixture                   # one row per player x fixture, with the event 
 The expected points the optimiser uses blend two models:
 
 ```
-xp = (1 - w) x points model + w x event model        w = config.EVENT_MODEL_WEIGHT (0.65)
+xp = (1 - w) x points model + w x event model        w = config.EVENT_MODEL_WEIGHT (0.70)
 ```
 
 The **points model** (gradient-boosted trees, below) predicts points directly; the
 **event model** builds them up from football events (team ratings → fixture goals →
 each player's goals, assists, clean sheets...). Each is good at something: the trees
 learn from everything in the player's record; the event model prices each fixture
-explicitly. The weight (0.65) and the recency half-life (4 gameweeks) are chosen on
+explicitly. The weight (0.70) and the recency half-life (16 gameweeks) are chosen on
 last season by rules fixed in advance, then checked on this season
 (`scripts/study_last_season.py`, `docs/08_accuracy.md`). On last season's 37 gameweeks
-any weight from 0.5 to 0.75 predicts almost equally well. The blend is more accurate
+any weight from 0.6 to 0.75 predicts almost equally well. The blend is more accurate
 than the points model alone, level with the event model, and better than every simple
 method.
 
@@ -46,9 +46,10 @@ as one blurred thing.
 ## Inputs and training
 One feature list (`model/inputs.py`) feeds both models: price at the time, recency-
 weighted form (points, minutes, xG, xA, xGI, defensive contributions, bonus, BPS,
-60-minute rate), the opponent's recency-weighted goals conceded (and its product with
-attacking form), venue, the last-season context columns, an `earlier_season` flag, and
-position. Training uses the multi-season table (Section 2) with its `sample_weight`, so
+60-minute rate), recent minutes (the latest match's minutes, 60+ minutes in the last
+three, matches missed in a row), the opponent's recency-weighted goals conceded (and
+its product with attacking form), venue, the last-season context columns, an
+`earlier_season` flag, and position. Training uses the multi-season table (Section 2) with its `sample_weight`, so
 2025/26 rows count half.
 
 **Every input must be knowable at the deadline.** Two columns the table carries for
